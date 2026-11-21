@@ -97,7 +97,7 @@ describe("InputController.handleImagePaste (issue #3506)", () => {
 		expect(spies.pendingImages[0]?.type).toBe("image");
 	});
 
-	it("attaches the image when the clipboard exposes a `file://` URL (Codex parity)", async () => {
+	it("attaches the image when the clipboard exposes a `file://` URL (provider parity)", async () => {
 		const { ctx, spies } = createCtx();
 		const fileUrl = new URL(`file://${imgPath}`).href;
 		const controller = new InputController(ctx, {

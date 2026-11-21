@@ -34,7 +34,7 @@ const { session } = await createAgentSession({
 	authStorage,
 	modelRegistry,
 	settings,
-	model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+	model: createTestModel({ provider: "anthropic", id: "test-model" }),
 	disableExtensionDiscovery: true,
 	skills: [],
 	contextFiles: [],

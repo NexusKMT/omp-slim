@@ -92,9 +92,9 @@ describe("session image persistence", () => {
 			message: {
 				role: "assistant",
 				content: [png(data)],
-				api: "openai-responses",
-				provider: "openai",
-				model: "gpt-image-test",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				usage: {
 					input: 0,
 					output: 0,
@@ -106,7 +106,7 @@ describe("session image persistence", () => {
 				stopReason: "stop",
 				providerPayload: {
 					type: "openaiResponsesHistory",
-					provider: "openai",
+					provider: "test",
 					items: [{ type: "image_generation_call", id: "ig_1", status: "completed", result: data }],
 				},
 				timestamp: Date.now(),

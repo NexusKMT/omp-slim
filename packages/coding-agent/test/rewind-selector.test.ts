@@ -35,9 +35,9 @@ function assistantWithBashCall(callId: string): AgentMessage {
 			{ type: "text", text: "Running a command." },
 			{ type: "toolCall", id: callId, name: "bash", arguments: { command: "ls" } },
 		],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage: {
 			input: 10,

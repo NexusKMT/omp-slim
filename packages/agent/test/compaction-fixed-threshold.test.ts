@@ -15,7 +15,7 @@ const fixed = (thresholdTokens: number, extra: Partial<CompactionSettings> = {})
 });
 
 describe("fixed compaction trigger near the window", () => {
-	// A provider capping the model below the configured trigger (Factory serves Kimi K3 with 196,608).
+	// A provider capping the model below the configured trigger (Factory serves test-model with 196,608).
 	const window = 196_608;
 	// max(floor(196608 * 0.15), 16384) = 29,491 reserved for the next prompt and response.
 	const budget = window - 29_491;

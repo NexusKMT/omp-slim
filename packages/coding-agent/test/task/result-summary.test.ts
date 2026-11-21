@@ -102,7 +102,7 @@ describe("formatTaskResultSummary", () => {
 		// Production 2026-09-21: a scout whose stream died mid-prose reported
 		// status="failed (exit 1)" with only the half-written text as <output>
 		// — the provider error lived nowhere in the envelope.
-		const error = "Anthropic stream envelope error: stream ended before message_stop";
+		const error = "Provider stream envelope error: stream ended before message_stop";
 		const summary = formatTaskResultSummary(
 			{ ...settledResult("I'll systematically investigate the codebase"), exitCode: 1, stderr: error, error },
 			{ totalDurationMs: 5 },

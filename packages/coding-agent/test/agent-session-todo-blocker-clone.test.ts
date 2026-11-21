@@ -28,7 +28,7 @@ describe("AgentSession todo blocker clone", () => {
 		sessionManager = SessionManager.inMemory();
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 
 		const agent = new Agent({
 			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },

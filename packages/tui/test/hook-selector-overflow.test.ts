@@ -70,7 +70,7 @@ describe("HookSelectorComponent", () => {
 	it("wraps outlined option text without omitting the tail", () => {
 		const options = [
 			"Option A: Move to OMP-native only by migrating reusable shared AI instructions into .omp/AGENTS.md, .omp/rules, .omp/skills, and .omp/agents while deliberately not creating a root .github directory.",
-			"Option B: Keep dual support by migrating canonical instructions into .omp while also maintaining a root .github/copilot-instructions.md compatibility bridge for editors that do not understand OMP resources yet.",
+			"Option B: Keep dual support by migrating canonical instructions into .omp while also maintaining a root .github/instructions.md compatibility bridge for editors that do not understand OMP resources yet.",
 		];
 		const component = new HookSelectorComponent(
 			"Which migration stance should be used?",

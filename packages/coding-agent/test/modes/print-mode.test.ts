@@ -12,13 +12,13 @@ import type { AgentSessionEvent } from "../../src/session/agent-session";
 const assistant: AssistantMessage = {
 	role: "assistant",
 	content: [{ type: "text", text: "hello" }],
-	api: "openai-responses",
-	provider: "openai",
-	model: "gpt-test",
+	api: "openai-completions",
+	provider: "test",
+	model: "test-model",
 	usage: {} as AssistantMessage["usage"],
 	stopReason: "stop",
 	timestamp: 1,
-	providerPayload: { type: "openaiResponsesHistory", provider: "openai", dt: true, items: [{ big: "blob" }] },
+	providerPayload: { type: "openaiResponsesHistory", provider: "test", dt: true, items: [{ big: "blob" }] },
 };
 
 describe("printableEvent", () => {
@@ -52,7 +52,7 @@ describe("printableEvent", () => {
 		};
 		expect(printed.message.providerPayload).toBeUndefined();
 		expect(printed.message.content).toEqual([{ type: "text", text: "hello" }]);
-		expect(printed.message.model).toBe("gpt-test");
+		expect(printed.message.model).toBe("test-model");
 	});
 
 	it("strips providerPayload from every message in agent_end", () => {

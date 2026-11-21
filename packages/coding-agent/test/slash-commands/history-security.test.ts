@@ -13,7 +13,7 @@ describe("shouldSkipHistory — security filter for slash command history", () =
 	it("skips /login with any argument (provider name or callback — all forms can carry secrets)", () => {
 		// parseCallbackInput() accepts redirect URLs, query strings, and raw auth codes.
 		// All /login-with-args are skipped to prevent any OAuth secret leakage.
-		expect(shouldSkipHistory("/login anthropic")).toBe(true);
+		expect(shouldSkipHistory("/login test")).toBe(true);
 		expect(shouldSkipHistory("/login ?code=abc&state=xyz")).toBe(true);
 		expect(shouldSkipHistory("/login raw-auth-code-xyz")).toBe(true);
 	});
@@ -51,7 +51,7 @@ describe("shouldSkipHistory — security filter for slash command history", () =
 		expect(shouldSkipHistory("/plan do something")).toBe(false);
 		expect(shouldSkipHistory("/settings")).toBe(false);
 		expect(shouldSkipHistory("/btw what is this")).toBe(false);
-		expect(shouldSkipHistory("/model claude")).toBe(false);
+		expect(shouldSkipHistory("/model test-model")).toBe(false);
 	});
 
 	it("returns false for non-slash text", () => {

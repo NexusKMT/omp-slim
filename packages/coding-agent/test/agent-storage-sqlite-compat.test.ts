@@ -50,9 +50,9 @@ describe("AgentStorage SQLite compatibility", () => {
 		const dbPath = path.join(tempDir.path(), "agent.db");
 
 		const storage = await AgentStorage.open(dbPath);
-		storage.recordModelUsage("openai/gpt-5");
+		storage.recordModelUsage("test/test-model");
 
-		expect(storage.getModelUsageOrder()).toEqual(["openai/gpt-5"]);
+		expect(storage.getModelUsageOrder()).toEqual(["test/test-model"]);
 		expect(readSchemaVersion(dbPath)).toBe(SCHEMA_VERSION);
 		expect(readTableSql(dbPath, "settings")).not.toContain("unixepoch(");
 		expect(readTableSql(dbPath, "settings")).toContain("strftime('%s','now')");
@@ -82,7 +82,7 @@ describe("AgentStorage SQLite compatibility", () => {
 			.run("theme", '"dark"', LEGACY_TIMESTAMP);
 		legacyDb
 			.prepare("INSERT INTO model_usage (model_key, last_used_at) VALUES (?, ?)")
-			.run("anthropic/claude-sonnet-4-5", LEGACY_TIMESTAMP);
+			.run("test/test-model", LEGACY_TIMESTAMP);
 		legacyDb.close();
 
 		const storage = await AgentStorage.open(dbPath);
@@ -93,7 +93,7 @@ describe("AgentStorage SQLite compatibility", () => {
 		expect(readTableSql(dbPath, "model_usage")).not.toContain("unixepoch(");
 		expect(readTableSql(dbPath, "model_usage")).toContain("strftime('%s','now')");
 		expect(storage.getSettings()).toEqual({ theme: "dark" });
-		expect(storage.getModelUsageOrder()).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(storage.getModelUsageOrder()).toEqual(["test/test-model"]);
 		expect(readSettingsRows(dbPath)).toEqual([{ key: "theme", value: '"dark"', updated_at: LEGACY_TIMESTAMP }]);
 	});
 

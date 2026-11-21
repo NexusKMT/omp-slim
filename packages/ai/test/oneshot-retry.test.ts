@@ -6,7 +6,7 @@ import { describe, expect, it } from "bun:test";
  * Defends the contract every oneshot LLM call site now depends on:
  * `completeSimple` reports a transient provider failure by RESOLVING with
  * `stopReason: "error"` rather than throwing, so a retry layer that only
- * catches exceptions silently never fires. Before this helper, an Anthropic
+ * catches exceptions silently never fires. Before this helper, a provider
  * `overloaded_error` / 429 / 529 on a summary, title, handoff or image
  * description failed on the first blip — or was swallowed into `null`, making a
  * transient overload indistinguishable from a legitimate empty result.
@@ -30,9 +30,9 @@ function message(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-6",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: emptyUsage(),
 		stopReason: "stop",
 		timestamp: 0,
@@ -44,7 +44,7 @@ const overloaded = (): AssistantMessage =>
 	message({
 		stopReason: "error",
 		errorStatus: 529,
-		errorMessage: "Anthropic stream error (overloaded_error): Overloaded",
+		errorMessage: "Provider stream error (overloaded_error): Overloaded",
 	});
 
 const rateLimited = (): AssistantMessage =>
@@ -288,7 +288,7 @@ describe("retryTransientCompletion", () => {
 	});
 
 	it("honors a retry-after-ms response header over the backoff floor", async () => {
-		// The header is the only place a real Anthropic 429 carries its wait: the
+		// The header is the only place a real 429 carries its wait: the
 		// resolved AssistantMessage has no headers, so a helper that reads only the
 		// error text would silently fall back to plain backoff.
 		let calls = 0;

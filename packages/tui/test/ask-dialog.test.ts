@@ -1867,7 +1867,7 @@ describe("AskDialogComponent", () => {
 	});
 
 	it("sanitizes carriage-return runs so degenerate model args render as prose", () => {
-		// GLM-via-OpenRouter degeneration: `\r` runs injected between words in
+		// Provider degeneration: `\r` runs injected between words in
 		// JSON string values. CommonMark treats a lone `\r` as a line ending, so
 		// an unsanitized description/preview used to splatter one word per row.
 		const component = new AskDialogComponent(

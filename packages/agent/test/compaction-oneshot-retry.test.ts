@@ -29,10 +29,10 @@ const emptyUsage = (): Usage =>
 	}) as unknown as Usage;
 
 const model = {
-	id: "claude-sonnet-4-6",
-	provider: "anthropic",
-	api: "anthropic-messages",
-	baseUrl: "https://api.anthropic.com",
+	id: "test-model",
+	provider: "test",
+	api: "openai-completions",
+	baseUrl: "https://example.invalid",
 	maxTokens: 8192,
 } as unknown as Model;
 
@@ -45,8 +45,8 @@ function overloaded(): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "" }],
-		provider: "anthropic",
-		model: "claude-sonnet-4-6",
+		provider: "test",
+		model: "test-model",
 		usage: emptyUsage(),
 		stopReason: "error",
 		errorMessage: "overloaded_error: Overloaded",
@@ -59,8 +59,8 @@ function summary(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		provider: "anthropic",
-		model: "claude-sonnet-4-6",
+		provider: "test",
+		model: "test-model",
 		usage: emptyUsage(),
 		stopReason: "stop",
 		timestamp: 0,

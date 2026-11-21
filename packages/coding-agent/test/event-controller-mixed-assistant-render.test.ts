@@ -41,7 +41,7 @@ function assistantMessage(content: AssistantMessage["content"]): AssistantMessag
 	return {
 		role: "assistant",
 		content,
-		api: "cursor",
+		api: "openai-completions",
 		provider: "cursor",
 		model: "cursor-model",
 		stopReason: "stop",

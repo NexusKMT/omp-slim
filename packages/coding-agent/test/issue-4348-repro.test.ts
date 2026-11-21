@@ -126,7 +126,7 @@ function cursorTurn(): AgentMessage[] {
 				arguments: { command: "ls -1" },
 			},
 		],
-		api: "cursor-agent",
+		api: "openai-completions",
 		provider: "cursor",
 		model: "cursor-composer-2.5",
 		usage: emptyUsage,

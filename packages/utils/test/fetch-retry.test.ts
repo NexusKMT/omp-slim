@@ -151,9 +151,9 @@ describe("fetchWithRetry", () => {
 	});
 
 	it("keeps the flattened `Network error:` wording for a direct cause", async () => {
-		const dns = Object.assign(new Error("getaddrinfo ENOTFOUND api.openai.com"), { code: "ENOTFOUND" });
+		const dns = Object.assign(new Error("getaddrinfo ENOTFOUND api.example.invalid"), { code: "ENOTFOUND" });
 		const error = await rejectionOf(
-			fetchWithRetry("https://api.openai.com/v1/chat/completions", {
+			fetchWithRetry("https://api.example.invalid/v1/chat/completions", {
 				fetch: async () => {
 					throw new TypeError("fetch failed", { cause: dns });
 				},
@@ -161,7 +161,7 @@ describe("fetchWithRetry", () => {
 			}),
 		);
 
-		expect(error.message).toBe("Network error: getaddrinfo ENOTFOUND api.openai.com");
+		expect(error.message).toBe("Network error: getaddrinfo ENOTFOUND api.example.invalid");
 	});
 });
 
@@ -177,29 +177,29 @@ describe("extractRetryHint", () => {
 	it("parses 'will reset in 2h' phrasing", () => {
 		expect(extractRetryHint(undefined, "will reset in 2h")).toBe(2 * 60 * 60_000);
 	});
-	// OpenCode Go quota errors use "Resets in …" with day units and compound
+	// Other Gateway quota errors use "Resets in …" with day units and compound
 	// remainders (upstream `formatRetryTime`: "2hr 15min", "3 days", "45min").
 	// Without these the exhausted credential falls back to the 60s heuristic
 	// and is reselected while the cap is still active.
-	it("parses OpenCode Go 'Resets in 45min' as 45 minutes", () => {
+	it("parses Other Gateway 'Resets in 45min' as 45 minutes", () => {
 		expect(
 			extractRetryHint(
 				undefined,
-				"429 5-hour usage limit reached. Resets in 45min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go",
+				"429 5-hour usage limit reached. Resets in 45min. To continue using this model now, enable usage from your available balance: https://example.invalid/workspace/wrk_1/go",
 			),
 		).toBe(45 * 60_000);
 	});
 
-	it("parses OpenCode Go compound 'Resets in 2hr 15min' as 2h15m", () => {
+	it("parses Other Gateway compound 'Resets in 2hr 15min' as 2h15m", () => {
 		expect(
 			extractRetryHint(
 				undefined,
-				"429 5-hour usage limit reached. Resets in 2hr 15min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go",
+				"429 5-hour usage limit reached. Resets in 2hr 15min. To continue using this model now, enable usage from your available balance: https://example.invalid/workspace/wrk_1/go",
 			),
 		).toBe((2 * 60 + 15) * 60_000);
 	});
 
-	it("parses OpenCode Go day-unit resets", () => {
+	it("parses Other Gateway day-unit resets", () => {
 		expect(extractRetryHint(undefined, "429 Weekly usage limit reached. Resets in 3 days.")).toBe(
 			3 * 24 * 60 * 60_000,
 		);

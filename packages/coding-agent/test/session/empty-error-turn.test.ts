@@ -58,9 +58,9 @@ describe("sanitizeAssistantForReparentedHistory", () => {
 				},
 				{ type: "text", text: "done" },
 			],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
-			model: "claude-opus",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -93,9 +93,9 @@ describe("sanitizeAssistantForReparentedHistory", () => {
 				{ type: "thinking", thinking: "unknown", itemId: "rs_3" },
 				{ type: "text", text: "done" },
 			],
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "openrouter",
-			model: "moonshotai/kimi-k3",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,

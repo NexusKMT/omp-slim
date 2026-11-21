@@ -587,7 +587,7 @@ describe("RpcInputDispatcher", () => {
 		const modelRegistry = new ModelRegistry(authStorage);
 		const sessionManager = SessionManager.inMemory();
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!model) throw new Error("Expected test-model model to exist");
 		const mock = createMockModel({ responses: [{ content: ["should not run before release"] }] });
 		const agent = new Agent({
 			getApiKey: () => "test-key",

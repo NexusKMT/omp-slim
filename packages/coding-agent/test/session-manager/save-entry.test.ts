@@ -20,9 +20,9 @@ describe("SessionManager.saveCustomEntry", () => {
 		const msg2Id = session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
-			api: "openai-responses",
-			provider: "openai",
-			model: "gpt-5-mini",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -32,7 +32,7 @@ describe("SessionManager.saveCustomEntry", () => {
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
-			providerPayload: { type: "openaiResponsesHistory", provider: "openai", items: nativeHistory },
+			providerPayload: { type: "openaiResponsesHistory", provider: "test", items: nativeHistory },
 			timestamp: 2,
 		});
 
@@ -60,7 +60,7 @@ describe("SessionManager.saveCustomEntry", () => {
 		if (ctx.messages[1]?.role !== "assistant") throw new Error("Expected assistant message");
 		expect(ctx.messages[1].providerPayload).toEqual({
 			type: "openaiResponsesHistory",
-			provider: "openai",
+			provider: "test",
 			items: nativeHistory,
 		});
 	});

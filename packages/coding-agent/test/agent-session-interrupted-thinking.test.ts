@@ -62,9 +62,9 @@ describe("convertToLlm empty user-interrupted assistant", () => {
 	const interrupted: AssistantMessage = {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-fable-5-1",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: emptyUsage(),
 		stopReason: "aborted",
 		errorMessage: USER_INTERRUPT_LABEL,
@@ -179,9 +179,9 @@ describe("AgentSession interrupted thinking persistence", () => {
 	/** A reader without a thinking ladder: no reasoning replays, no continuity quote. */
 	function nonThinkingReader(): Model<Api> {
 		return buildModel({
-			id: "claude-sonnet-4-5",
-			name: "claude-sonnet-4-5",
-			provider: "anthropic",
+			id: "test-model",
+			name: "test-model",
+			provider: "test",
 			api: "openai-completions",
 			baseUrl: "https://example.invalid/v1",
 			input: ["text", "image"],
@@ -263,7 +263,7 @@ describe("AgentSession interrupted thinking persistence", () => {
 
 		const messages = harness.session.agent.state.messages;
 		// Thinking stays on the assistant for display/reload; the provider transform
-		// drops the unsigned run from replay (pi-ai anthropic-prior-turn-thinking suite).
+		// drops the unsigned run from replay (pi-ai prior-turn-thinking suite).
 		expect(messages.find(isAssistantMessage)?.content.some(block => block.type === "thinking")).toBe(true);
 		expect(messages.some(isInterruptedThinkingMessage)).toBe(false);
 		expect(

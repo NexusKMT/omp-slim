@@ -181,11 +181,11 @@ describe("job widget derivation", () => {
 		const h = harness(spec, out);
 		out.append(
 			[
-				"start bash openai-codex/gpt-6-luna t1",
-				"finish bash openai-codex/gpt-6-luna t1: reward=1 tests=36/36 stop=done turns=7 52s",
-				"finish bash anthropic/claude-sonnet-5 t1: reward=0 tests=20/36 stop=done turns=9 61s",
-				"finish bash openai-codex/gpt-6-luna t2: reward=0 tests=27/36 stop=done turns=5 39s",
-				"finish bash anthropic/claude-sonnet-5 t2: reward=1 tests=36/36 stop=done turns=8 47s",
+				"start bash test/test-model t1",
+				"finish bash test/test-model t1: reward=1 tests=36/36 stop=done turns=7 52s",
+				"finish bash test/test-model-2 t1: reward=0 tests=20/36 stop=done turns=9 61s",
+				"finish bash test/test-model t2: reward=0 tests=27/36 stop=done turns=5 39s",
+				"finish bash test/test-model-2 t2: reward=1 tests=36/36 stop=done turns=8 47s",
 				"",
 			].join("\n"),
 		);
@@ -197,8 +197,8 @@ describe("job widget derivation", () => {
 			max: 36,
 			items: [
 				// Provider prefixes drop while the model names stay unique.
-				{ label: "gpt-6-luna", value: 31.5, text: "31.5", tone: "success" },
-				{ label: "claude-sonnet-5", value: 28, text: "28" },
+				{ label: "test-model", value: 31.5, text: "31.5", tone: "success" },
+				{ label: "test-model-2", value: 28, text: "28" },
 			],
 		});
 		expect(block(view, "meter")).toMatchObject({ value: 4 / 9, text: "4/9 trials" });
@@ -332,28 +332,28 @@ describe("job widget derivation", () => {
 	it("joins lines split across reads and skips the line torn by a dropped prefix", () => {
 		const spec = validSpec({
 			title: "bench",
-			// Unanchored on purpose: a torn `…una tok=186` would otherwise read as model `una`.
+			// Unanchored on purpose: a torn `…odel tok=186` would otherwise read as model `odel`.
 			rules: [{ from: "out", match: String.raw`(?P<model>\S+) tok=(?P<tok>[\d.]+)`, key: "model" }],
 			blocks: [{ kind: "bars", field: "tok", agg: "last", label: "tok/s" }],
 		});
 		const out = new ScriptedSource("out");
 		const h = harness(spec, out);
-		out.append("BENCH gpt-6-luna tok=1");
+		out.append("BENCH test-model tok=1");
 		h.ingest();
-		out.append("80\nBENCH gpt-6-sol tok=9");
+		out.append("80\nBENCH test-alt tok=9");
 		h.ingest();
 		out.append("0\n");
 		h.ingest();
-		out.append("BENCH gpt-6-luna tok=186\nBENCH gpt-6-sol tok=95\n");
-		out.drop(out.offsetAfter("BENCH gpt-6-l"));
+		out.append("BENCH test-model tok=186\nBENCH test-alt tok=95\n");
+		out.drop(out.offsetAfter("BENCH test-m"));
 		h.ingest();
 		// The source closes mid-line: the final line still counts.
-		out.append("BENCH gpt-6-luna tok=190");
+		out.append("BENCH test-model tok=190");
 		out.open = false;
 		h.ingest();
 		expect(block(h.view(), "bars").items.map(item => [item.label, item.value])).toEqual([
-			["gpt-6-luna", 190],
-			["gpt-6-sol", 95],
+			["test-model", 190],
+			["test-alt", 95],
 		]);
 	});
 

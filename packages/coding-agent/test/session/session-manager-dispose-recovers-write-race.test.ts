@@ -113,8 +113,8 @@ class FakeIndexedBackend implements SessionStorageBackend {
 function assistantMessage(text: string) {
 	return {
 		role: "assistant" as const,
-		provider: "anthropic",
-		model: "claude-3-7-sonnet",
+		provider: "test",
+		model: "test-model",
 		content: [{ type: "text" as const, text }],
 		usage: {
 			input: 1,
@@ -124,7 +124,7 @@ function assistantMessage(text: string) {
 			totalTokens: 2,
 			cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		},
-		api: "anthropic-messages" as const,
+		api: "openai-completions" as const,
 		stopReason: "stop" as const,
 		timestamp: Date.now(),
 	};

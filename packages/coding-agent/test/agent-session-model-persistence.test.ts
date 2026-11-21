@@ -20,7 +20,7 @@ describe("AgentSession model persistence", () => {
 	let session: AgentSession | undefined;
 	let sessionSettings: Settings;
 	// Auth storage (SQLite DB) and the model registry are immutable across these tests:
-	// every test sets the same anthropic/zai runtime keys and only ever reads the bundled model
+	// every test sets the same test/test2 runtime keys and only ever reads the bundled model
 	// list. Building them once avoids ~12 SQLite opens + registry constructions.
 	let sharedDir: TempDir;
 	let sharedAuthStorage: AuthStorage;
@@ -29,22 +29,22 @@ describe("AgentSession model persistence", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-model-persistence-shared-");
 		sharedAuthStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
-		sharedAuthStorage.keys.setRuntime("anthropic", "test-key");
-		sharedAuthStorage.keys.setRuntime("zai", "test-key");
+		sharedAuthStorage.keys.setRuntime("test", "test-key");
+		sharedAuthStorage.keys.setRuntime("test2", "test-key");
 		// The slim catalog ships no bundled models, so the registry resolves the
-		// persisted anthropic model strings these tests write/restore against a
+		// persisted test model strings these tests write/restore against a
 		// synthetic openai-completions provider instead.
 		await Bun.write(
 			path.join(sharedDir.path(), "models.yml"),
 			JSON.stringify({
 				providers: {
-					anthropic: {
+					test: {
 						baseUrl: "https://example.invalid/v1",
 						api: "openai-completions",
 						models: [
 							{
-								id: "claude-sonnet-4-5",
-								name: "claude-sonnet-4-5",
+								id: "test-model",
+								name: "test-model",
 								reasoning: false,
 								input: ["text", "image"],
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -52,8 +52,8 @@ describe("AgentSession model persistence", () => {
 								maxTokens: 8_192,
 							},
 							{
-								id: "claude-sonnet-4-6",
-								name: "claude-sonnet-4-6",
+								id: "test-model-2",
+								name: "test-model-2",
 								reasoning: false,
 								input: ["text", "image"],
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -85,9 +85,9 @@ describe("AgentSession model persistence", () => {
 		tempDir.removeSync();
 	});
 
-	function getAnthropicModelOrThrow(id: string): Model<Api> {
-		const model = createTestModel({ provider: "anthropic", id: id });
-		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
+	function getTestModelOrThrow(id: string): Model<Api> {
+		const model = createTestModel({ provider: "test", id: id });
+		if (!model) throw new Error(`Expected test model ${id} to exist`);
 		return model;
 	}
 
@@ -138,7 +138,7 @@ describe("AgentSession model persistence", () => {
 		const model =
 			options?.initialModel ??
 			options?.selectInitialModel?.(modelRegistry.getAvailable()) ??
-			getAnthropicModelOrThrow("claude-sonnet-4-5");
+			getTestModelOrThrow("test-model");
 		const agent = new Agent({
 			initialState: {
 				model,
@@ -196,8 +196,8 @@ describe("AgentSession model persistence", () => {
 		return result;
 	}
 	it("switches the active model without persisting by default", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const nextModel = getTestModelOrThrow("test-model-2");
 		const defaultRoleValue = modelValue(defaultModel);
 
 		const created = await createSession({
@@ -220,8 +220,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("persists the default role when explicitly requested", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const nextModel = getTestModelOrThrow("test-model-2");
 
 		const created = await createSession({
 			initialModel: defaultModel,
@@ -235,8 +235,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("switches the active model even when the live context is over the target window", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const nextModel = getTestModelOrThrow("test-model-2");
 
 		const created = await createSession({
 			initialModel: defaultModel,
@@ -278,8 +278,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("restores the saved default model when switch-session last role is fallback", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const fallbackModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const fallbackModel = getTestModelOrThrow("test-model-2");
 		const defaultRoleValue = modelValue(defaultModel);
 		const targetSessionFile = await writeRoleModelSession(
 			defaultRoleValue,
@@ -298,8 +298,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("restores the saved default model when startup last role is fallback", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const fallbackModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const fallbackModel = getTestModelOrThrow("test-model-2");
 		const defaultRoleValue = modelValue(defaultModel);
 		const targetSessionFile = await writeRoleModelSession(
 			defaultRoleValue,
@@ -315,8 +315,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("restores a temporary model when switching sessions", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const temporaryModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const temporaryModel = getTestModelOrThrow("test-model-2");
 		const defaultRoleValue = modelValue(defaultModel);
 		const targetSessionFile = await writeRoleModelSession(defaultRoleValue, modelValue(temporaryModel), "temporary");
 
@@ -331,8 +331,8 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("restores a temporary model during startup resume", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
-		const temporaryModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const defaultModel = getTestModelOrThrow("test-model");
+		const temporaryModel = getTestModelOrThrow("test-model-2");
 		const defaultRoleValue = modelValue(defaultModel);
 		const targetSessionFile = await writeRoleModelSession(defaultRoleValue, modelValue(temporaryModel), "temporary");
 		const settings = Settings.isolated();
@@ -348,9 +348,9 @@ describe("AgentSession model persistence", () => {
 		const interruptedAssistant: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "toolCall", id: "call_read", name: "read", arguments: { path: "state.txt" } }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -402,7 +402,7 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("marks a first user-message process-exit tail aborted with the selected model", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const defaultModel = getTestModelOrThrow("test-model");
 		const settings = Settings.isolated();
 		settings.setModel(modelValue(defaultModel));
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "interrupted-user"));
@@ -487,12 +487,12 @@ describe("AgentSession model persistence", () => {
 		return summary.blocks?.filter(block => block.type === "image").length ?? 0;
 	}
 
-	/** Resumes a session whose archive was compacted on the official Anthropic API. */
+	/** Resumes a session whose archive was compacted on the official Test API. */
 	async function resumeArchivedSession(
 		authStorage: AuthStorage,
 		modelRegistry: ModelRegistry,
 	): Promise<CreateAgentSessionResult> {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const defaultModel = getTestModelOrThrow("test-model");
 		const settings = Settings.isolated();
 		settings.setModel(modelValue(defaultModel));
 		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "archived"));
@@ -533,7 +533,7 @@ describe("AgentSession model persistence", () => {
 	});
 
 	it("marks an interrupted first turn aborted when switching sessions", async () => {
-		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const defaultModel = getTestModelOrThrow("test-model");
 		const created = await createSession({ initialModel: defaultModel, persist: true });
 		const targetFile = path.join(tempDir.path(), "switch-interrupted-user.jsonl");
 		const timestamp = "2026-07-11T02:20:08.800Z";
@@ -583,23 +583,23 @@ describe("AgentSession model persistence", () => {
 		expect(
 			getRestorableSessionModels(
 				{
-					default: "anthropic/claude-sonnet-4-5",
-					temporary: "anthropic/claude-sonnet-4-6",
+					default: "test/test-model",
+					temporary: "test/test-model-2",
 				},
 				"temporary",
 			),
-		).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"]);
+		).toEqual(["test/test-model-2", "test/test-model"]);
 	});
 
 	it("lists only the default model for ephemeral fallback restores", () => {
 		expect(
 			getRestorableSessionModels(
 				{
-					default: "anthropic/claude-sonnet-4-5",
-					[EPHEMERAL_MODEL_CHANGE_ROLE]: "anthropic/claude-sonnet-4-6",
+					default: "test/test-model",
+					[EPHEMERAL_MODEL_CHANGE_ROLE]: "test/test-model-2",
 				},
 				EPHEMERAL_MODEL_CHANGE_ROLE,
 			),
-		).toEqual(["anthropic/claude-sonnet-4-5"]);
+		).toEqual(["test/test-model"]);
 	});
 });

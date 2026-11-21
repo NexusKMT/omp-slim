@@ -50,7 +50,7 @@ const mock = createMockModel({ handler: { content: ["ok"] } });
 const agent = new Agent({
 	getApiKey: () => "test-key",
 	initialState: {
-		model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+		model: createTestModel({ provider: "anthropic", id: "test-model" })!,
 		systemPrompt: ["Test"],
 		tools: [],
 	},

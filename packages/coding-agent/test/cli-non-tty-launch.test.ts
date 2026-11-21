@@ -10,8 +10,8 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 const cliEntry = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
 const TTY_ERROR = "interactive mode requires a terminal";
-const NO_API_KEY = "No API key found for anthropic.";
-const MODEL_ARGS = ["--provider", "anthropic", "--model", "claude-sonnet-4-5"];
+const NO_API_KEY = "No API key found for test.";
+const MODEL_ARGS = ["--provider", "test", "--model", "test-model"];
 
 interface LaunchRun {
 	exitCode: number;
@@ -27,7 +27,7 @@ async function launchWithoutTerminal(
 	const home = tempDir.join("home");
 	fs.mkdirSync(home, { recursive: true });
 	// The slim catalog ships no bundled models, so configure the launch's
-	// `--provider anthropic --model claude-sonnet-4-5` as an openai-completions
+	// `--provider test --model test-model` as an openai-completions
 	// endpoint (without an apiKey) in the isolated agent dir.
 	const agentDir = path.join(home, ".omp", "agent");
 	fs.mkdirSync(agentDir, { recursive: true });
@@ -35,12 +35,12 @@ async function launchWithoutTerminal(
 		path.join(agentDir, "models.yml"),
 		[
 			"providers:",
-			"  anthropic:",
-			'    baseUrl: "https://api.anthropic.com"',
+			"  test:",
+			'    baseUrl: "https://example.invalid"',
 			'    api: "openai-completions"',
 			'    auth: "apiKey"',
 			"    models:",
-			'      - id: "claude-sonnet-4-5"',
+			'      - id: "test-model"',
 		].join("\n"),
 	);
 	// An isolated home, minimal environment, and explicit authenticated model

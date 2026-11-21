@@ -291,9 +291,9 @@ describe("SessionManager.forkFrom", () => {
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id: "task-call-1", name: "task", arguments: { task: "inspect" } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "toolUse",
 				timestamp: Date.now(),
 				usage: {
@@ -672,9 +672,9 @@ describe("SessionManager.forkFrom", () => {
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id: "toolu_live", name: "bash", arguments: { command: "sleep 40" } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "toolUse",
 				timestamp: Date.now(),
 				usage: {
@@ -744,9 +744,9 @@ describe("SessionManager.forkFrom", () => {
 				message: {
 					role: "assistant",
 					content: [{ type: "toolCall", id: "toolu_crashed", name: "bash", arguments: { command: "make" } }],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					stopReason: "toolUse",
 					timestamp: Date.now(),
 					usage: {
@@ -814,9 +814,9 @@ describe("SessionManager.forkFrom", () => {
 						arguments: { path: "partial.txt", content: "incomplete payload" },
 					},
 				],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "length",
 				timestamp: Date.now(),
 				usage: {
@@ -927,9 +927,9 @@ describe("SessionManager.forkFrom", () => {
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id: "toolu_active", name: "bash", arguments: { command: "sleep 40" } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "toolUse",
 				timestamp: Date.now(),
 				usage,
@@ -957,9 +957,9 @@ describe("SessionManager.forkFrom", () => {
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id: "toolu_sibling", name: "read", arguments: { path: "old.txt" } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "toolUse",
 				timestamp: Date.now(),
 				usage,
@@ -1030,9 +1030,9 @@ describe("SessionManager.forkFrom", () => {
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id: "toolu_done", name: "bash", arguments: { command: "echo hi" } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "toolUse",
 				timestamp: Date.now(),
 				usage: {

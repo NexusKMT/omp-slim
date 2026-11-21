@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { sortMCPToolsByName } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 
-// `sortMCPToolsByName` is the cache-stability invariant: Anthropic prompt caching
+// `sortMCPToolsByName` is the cache-stability invariant: provider prompt caching
 // keys on byte-identical tool definitions, so the tools array sent to the API
 // must be byte-stable across MCP server connect / reconnect / refresh cycles.
 // These tests defend that invariant directly because the production call sites

@@ -39,21 +39,21 @@ test("agent startup quarantines corruption and persists new usage", async () => 
 
 	AgentStorage.close();
 	const original = await AgentStorage.open(dbPath);
-	original.recordModelUsage("openai/damaged");
+	original.recordModelUsage("test/damaged");
 	AgentStorage.close();
 	const damaged = await corruptDatabase(dbPath);
 
 	try {
 		const storage = await AgentStorage.open(dbPath);
 		expect(storage.getModelUsageOrder()).toEqual([]);
-		storage.recordModelUsage("openai/recovered");
+		storage.recordModelUsage("test/recovered");
 	} finally {
 		AgentStorage.close();
 	}
 
 	const reopened = await AgentStorage.open(dbPath);
 	try {
-		expect(reopened.getModelUsageOrder()).toEqual(["openai/recovered"]);
+		expect(reopened.getModelUsageOrder()).toEqual(["test/recovered"]);
 	} finally {
 		AgentStorage.close();
 	}

@@ -91,7 +91,7 @@ function sessionFixtureJsonl(userText = "parked hello", headerId = "fixture-sess
 		message: {
 			role: "assistant",
 			content: [{ type: "text", text: "parked reply" }],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
 			model: "test-model",
 			usage: {},
@@ -294,9 +294,9 @@ describe("history:// protocol", () => {
 							},
 						},
 						{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
-						{ type: "fallback", from: { model: "claude-primary" }, to: { model: "claude-backup" } },
+						{ type: "fallback", from: { model: "test-primary" }, to: { model: "test-backup" } },
 					],
-					api: "anthropic-messages",
+					api: "openai-completions",
 					provider: "anthropic",
 					model: "test-model",
 					usage: {},
@@ -321,7 +321,7 @@ describe("history:// protocol", () => {
 		// Image blocks render as metadata without base64 bytes.
 		expect(content).toContain("[image: image/png,");
 		expect(content).not.toContain("aGVsbG8=");
-		expect(content).toContain("[provider fallback: claude-primary to claude-backup]");
+		expect(content).toContain("[provider fallback: test-primary to test-backup]");
 	});
 
 	it("renders the caller-bound branch's full pre-compaction transcript without a disk source", async () => {

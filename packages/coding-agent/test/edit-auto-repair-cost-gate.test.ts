@@ -20,7 +20,7 @@ function billedOverload(cost: number): AssistantMessage {
 	const message = createAssistantMessage("");
 	message.stopReason = "error";
 	message.errorStatus = 529;
-	message.errorMessage = "Anthropic stream error (overloaded_error): Overloaded";
+	message.errorMessage = "Provider stream error (overloaded_error): Overloaded";
 	message.usage.cost.total = cost;
 	return message;
 }
@@ -39,7 +39,7 @@ describe("edit auto-repair cost cap", () => {
 		const model = {
 			id: "repair-model",
 			name: "Repair Model",
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "llama.cpp",
 			baseUrl: "http://127.0.0.1:8080/v1",
 			reasoning: false,

@@ -85,16 +85,16 @@ describe("InteractiveMode deferred command preview", () => {
 		setStreaming(true);
 		const transcriptBefore = transcriptRowCount(mode);
 
-		mode.presentCommandOutput(new Text("Claude 5 Hour: 62% used", 1, 0));
+		mode.presentCommandOutput(new Text("Test Model Hour: 62% used", 1, 0));
 
 		// The answer is visible right away, which is the whole point: before this,
 		// a command run mid-turn was indistinguishable from a dead one.
-		expect(noticeText(mode)).toContain("Claude 5 Hour: 62% used");
+		expect(noticeText(mode)).toContain("Test Model Hour: 62% used");
 		// But never via the transcript: a mid-turn transcript mount re-renders rows
 		// below the growing live block and duplicates them in native scrollback
 		// (issues #4806/#6767), which is what deferral was introduced to stop.
 		expect(transcriptRowCount(mode)).toBe(transcriptBefore);
-		expect(transcriptText(mode)).not.toContain("Claude 5 Hour");
+		expect(transcriptText(mode)).not.toContain("Test Model Hour");
 	});
 
 	it("mounts mid-turn output straight into the transcript on a Tern surface", async () => {

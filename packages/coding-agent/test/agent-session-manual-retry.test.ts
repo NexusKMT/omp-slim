@@ -49,7 +49,7 @@ describe("AgentSession manual retry", () => {
 	it("removes the failed assistant turn and continues with a fresh attempt", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const mock = createMockModel({
@@ -91,7 +91,7 @@ describe("AgentSession manual retry", () => {
 	it("returns false when the trailing assistant turn succeeded", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const mock = createMockModel({
@@ -126,7 +126,7 @@ describe("AgentSession manual retry", () => {
 	it("retries past synthetic tool results left by a mid-tool-call stream stall", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		// First turn stalls mid-tool-call: the assistant emits a `write` tool call
@@ -138,7 +138,7 @@ describe("AgentSession manual retry", () => {
 				{
 					content: [{ type: "toolCall", name: "write", arguments: { path: "plan.md", content: "x" } }],
 					stopReason: "error",
-					errorMessage: "OpenAI completions stream stalled while waiting for the next event",
+					errorMessage: "Completions stream stalled while waiting for the next event",
 				},
 				{ content: ["recovered after stalled tool call"], stopReason: "stop" },
 			],
@@ -185,7 +185,7 @@ describe("AgentSession manual retry", () => {
 	it("reports an aborted tool-call tail only when the failed turn ended on a tool call", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const mock = createMockModel({ responses: [] });
@@ -262,7 +262,7 @@ describe("AgentSession manual retry", () => {
 	it("re-executes the aborted tool call instead of re-issuing it via the model", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const toolSchema = type({ value: type("string") });
@@ -357,7 +357,7 @@ describe("AgentSession manual retry", () => {
 	it("retries an aborted tool-call turn past a background-job result folded in after the interrupt", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const toolSchema = type({ question: type("string") });
@@ -457,7 +457,7 @@ describe("AgentSession manual retry", () => {
 	it("retries a persisted failed turn after rebuilding provider context", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const mock = createMockModel({
@@ -549,7 +549,7 @@ describe("AgentSession manual retry", () => {
 	it("lets an idle aside start a turn after the user resumes an interrupted run with retry", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled Anthropic test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		const toolSchema = type({});

@@ -27,11 +27,11 @@ const agent: AgentDefinition = { name: "task", description: "test", systemPrompt
 // Slim removed subagent model-pattern resolution (`resolveModelOverrideWithAuthFallback`):
 // a nested run now inherits the parent session's exact model via `parentModel`.
 const parentModel: Model<Api> = buildModel({
-	id: "deepseek-v4-pro",
-	name: "DeepSeek V4 Pro",
+	id: "test-model",
+	name: "Test Model",
 	api: "openai-completions",
-	provider: "deepseek",
-	baseUrl: "https://api.deepseek.com",
+	provider: "test",
+	baseUrl: "https://example.invalid",
 	reasoning: false,
 	input: ["text"],
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

@@ -90,7 +90,7 @@ describe("AgentSession eager task prelude", () => {
 	): Harness {
 		const observedCalls: ObservedPromptCall[] = [];
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!model) throw new Error("Expected test-model model to exist");
 
 		const authStorage = createInMemoryAuthStorage();
 		authStorage.keys.setRuntime("test", "test-key");

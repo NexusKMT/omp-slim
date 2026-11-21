@@ -12,8 +12,8 @@ function assistant(block: TextContent): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [block],
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "test-model",
 		usage: {
 			input: 0,

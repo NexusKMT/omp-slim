@@ -6,9 +6,9 @@ function message(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 0,
 			output: 0,
@@ -25,17 +25,17 @@ function message(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 
 describe("error-id classification", () => {
 	it("composes timeout with transient", () => {
-		const id = AIError.classify(new Error("provider stream stall timeout"), "anthropic-messages");
+		const id = AIError.classify(new Error("provider stream stall timeout"), "openai-completions");
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.Timeout)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.Class)).toBe(true);
 	});
 
-	it("classifies OpenAI stream_read_error as transient", () => {
+	it("classifies a stream_read_error as transient", () => {
 		const assistant = message({
-			api: "openai-responses",
-			provider: "openai",
-			model: "gpt-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			errorMessage: "Error Code stream_read_error: stream_read_error",
 		});
 		const id = AIError.classifyMessage(assistant);
@@ -52,11 +52,11 @@ describe("error-id classification", () => {
 	});
 	it.each([
 		"error decoding response body",
-		"Anthropic stream error (api_error): invalid response",
+		"Provider stream error (api_error): invalid response",
 		"Failed to parse tool call arguments as JSON",
-		"Anthropic stream error (authentication_error): 401 Unauthorized",
+		"Provider stream error (authentication_error): 401 Unauthorized",
 	])("does not infer a transport retry from unrelated failures: %s", errorMessage => {
-		const error = new AIError.ProviderResponseError(errorMessage, { provider: "anthropic", kind: "output" });
+		const error = new AIError.ProviderResponseError(errorMessage, { provider: "test", kind: "output" });
 		const id = AIError.classifyMessage(message({ errorMessage }));
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
 		expect(AIError.retriable(id)).toBe(false);
@@ -168,10 +168,10 @@ describe("error-id classification", () => {
 
 	it("keeps provider content filters non-retryable", () => {
 		const error = new AIError.ProviderResponseError("Provider returned error finish_reason: content_filter", {
-			provider: "openrouter",
+			provider: "test",
 			kind: "content-blocked",
 		});
-		const id = AIError.classify(error, "openai-responses");
+		const id = AIError.classify(error, "openai-completions");
 		expect(AIError.is(id, AIError.Flag.ContentBlocked)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.ProviderFinishError)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
@@ -180,14 +180,14 @@ describe("error-id classification", () => {
 	it("walks causes and preserves carried ids", () => {
 		const inner = AIError.attach(new Error("inner"), AIError.create(AIError.Flag.ThinkingLoop));
 		const outer = new Error("outer", { cause: inner });
-		const id = AIError.classify(outer, "anthropic-messages");
+		const id = AIError.classify(outer, "openai-completions");
 		expect(AIError.is(id, AIError.Flag.ThinkingLoop)).toBe(true);
 	});
 
 	it("combines wrapper text classification with cause ids", () => {
 		const cause = AIError.attach(new Error("quota reached"), AIError.create(AIError.Flag.UsageLimit));
 		const outer = new Error("network stream stall", { cause });
-		const id = AIError.classify(outer, "anthropic-messages");
+		const id = AIError.classify(outer, "openai-completions");
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.Timeout)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.UsageLimit)).toBe(true);
@@ -217,10 +217,10 @@ describe("error-id classification", () => {
 	it("retries remote Python HTTP/2 internal and refused stream resets", () => {
 		for (const code of [2, 7]) {
 			const assistant = message({
-				api: "openai-codex-responses",
-				provider: "openai-codex",
+				api: "openai-completions",
+				provider: "test",
 				errorId: 0,
-				errorMessage: `Codex error event: <StreamReset stream_id:1283, error_code:${code}, remote_reset:True> (code=api_error)`,
+				errorMessage: `Provider error event: <StreamReset stream_id:1283, error_code:${code}, remote_reset:True> (code=api_error)`,
 			});
 			expect(AIError.retriable(AIError.classifyMessage(assistant))).toBe(true);
 		}
@@ -234,9 +234,9 @@ describe("error-id classification", () => {
 			"error_code:2",
 		]) {
 			const assistant = message({
-				api: "openai-codex-responses",
-				provider: "openai-codex",
-				errorMessage: `Codex error event: <StreamReset stream_id:1283, ${details}> (code=api_error)`,
+				api: "openai-completions",
+				provider: "test",
+				errorMessage: `Provider error event: <StreamReset stream_id:1283, ${details}> (code=api_error)`,
 			});
 			expect(AIError.retriable(AIError.classifyMessage(assistant))).toBe(false);
 		}
@@ -244,13 +244,13 @@ describe("error-id classification", () => {
 
 	it("keeps generic API and chunk-format errors outside transient recovery", () => {
 		for (const errorMessage of [
-			"Codex error event: invalid chunk header (code=api_error)",
-			"Codex error event: malformed chunk footer (code=api_error)",
-			"Codex error event: invalid request body (code=api_error)",
+			"Provider error event: invalid chunk header (code=api_error)",
+			"Provider error event: malformed chunk footer (code=api_error)",
+			"Provider error event: invalid request body (code=api_error)",
 		]) {
 			const assistant = message({
-				api: "openai-codex-responses",
-				provider: "openai-codex",
+				api: "openai-completions",
+				provider: "test",
 				errorMessage,
 			});
 			expect(AIError.retriable(AIError.classifyMessage(assistant))).toBe(false);

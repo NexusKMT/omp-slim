@@ -19,8 +19,8 @@ class CountingMemorySessionStorage extends MemorySessionStorage {
 }
 
 function makeAssistantMessage(text: string) {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
-	if (!model) throw new Error("Expected built-in anthropic model to exist");
+	const model = createTestModel({ provider: "test", id: "test-model" });
+	if (!model) throw new Error("Expected built-in test model to exist");
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text }],
@@ -73,7 +73,7 @@ describe("large session memory guards", () => {
 			{ type: "message", role: "user", content: [{ type: "input_text", text: "Preserved user" }] },
 		];
 		const firstPreserve = {
-			openaiRemoteCompaction: { provider: "openai", replacementHistory },
+		openaiRemoteCompaction: { provider: "test", replacementHistory },
 			[snapcompact.PRESERVE_KEY]: {
 				frames: [{ data: archivedFrame, mimeType: "image/png", cols: 10, rows: 10, chars: 14 }],
 				totalChars: 14,
@@ -170,7 +170,7 @@ describe("large session memory guards", () => {
 		session.appendMessage(makeAssistantMessage("root reply"));
 
 		const branchACompactionSummary = `branch-a-${"x".repeat(1024)}`;
-		const branchAPreserve = { openaiRemoteCompaction: { provider: "anthropic", replacementHistory: [] } };
+		const branchAPreserve = { openaiRemoteCompaction: { provider: "test", replacementHistory: [] } };
 		session.appendCompaction(branchACompactionSummary, undefined, rootId, 1000, {
 			preserveData: branchAPreserve,
 		});
@@ -217,7 +217,7 @@ describe("large session memory guards", () => {
 				summary: branchASummary,
 				firstKeptEntryId: "u1",
 				tokensBefore: 1000,
-				preserveData: { openaiRemoteCompaction: { provider: "anthropic", replacementHistory: [] } },
+				preserveData: { openaiRemoteCompaction: { provider: "test", replacementHistory: [] } },
 			},
 			{
 				type: "compaction",

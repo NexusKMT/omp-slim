@@ -15,9 +15,9 @@ function assistant(content: AssistantMessage["content"], stopReason: AssistantMe
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage,
 		stopReason,
 		timestamp: 1,

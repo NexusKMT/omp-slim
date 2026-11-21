@@ -23,13 +23,13 @@ interface CapturedJobRunContext {
 
 type CapturedJobRun = (ctx: CapturedJobRunContext) => Promise<string>;
 
-const model = { provider: "anthropic", id: "claude-sonnet-4-5" } as Model;
+const model = { provider: "test", id: "test-model" } as Model;
 
 function assistantText(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
+		api: "openai-completions",
 		provider: model.provider,
 		model: model.id,
 		usage: {

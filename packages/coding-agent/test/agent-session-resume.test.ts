@@ -135,7 +135,7 @@ describe("AgentSession.resume", () => {
 			const dropped: string[] = [];
 			session.setPromptDropped(prompt => dropped.push(prompt.text));
 
-			await expect(session.prompt("finish this request")).rejects.toThrow("No API key found for anthropic");
+			await expect(session.prompt("finish this request")).rejects.toThrow("No API key found for test");
 			expect(dropped).toEqual(["finish this request"]);
 			await expect(session.resume()).rejects.toThrow("Nothing to resume");
 			expect(mock.calls).toHaveLength(0);

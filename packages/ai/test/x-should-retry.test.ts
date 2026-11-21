@@ -4,7 +4,7 @@ import { OpenAIHttpError, postOpenAIStream } from "../src/utils/openai-http";
 import { mockFetch } from "./helpers/fetch-mock";
 
 // A retrying gateway that already exhausted its own attempts answers with a
-// terminal 5xx plus `x-should-retry: false`. The removed `openai` SDK obeyed
+// terminal 5xx plus `x-should-retry: false`. The removed `provider` SDK obeyed
 // that verdict; the wire transport and the provider retry loops must too, or
 // every layer replays a request the gateway already gave up on (#17920).
 function terminal503(): Response {
@@ -33,7 +33,7 @@ async function captureStreamError(response: () => Response): Promise<{ attempts:
 	return { attempts, error };
 }
 
-describe("x-should-retry on the OpenAI wire (#17920)", () => {
+describe("x-should-retry on the provider wire (#17920)", () => {
 	test("transport surfaces a terminal 503 on the first attempt", async () => {
 		const { attempts, error } = await captureStreamError(terminal503);
 

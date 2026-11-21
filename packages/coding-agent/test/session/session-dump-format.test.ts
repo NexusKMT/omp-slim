@@ -17,7 +17,7 @@ const ZERO_USAGE: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-const HARMONY_MODEL = { provider: "openai", id: "gpt-5", name: "GPT-5" } as Model;
+const HARMONY_MODEL = { provider: "test", id: "test-model", name: "Test Model" } as Model;
 
 describe("formatSessionDumpText tool parameters", () => {
 	it("renders arktype schemas as JSON Schema, not schema internals", () => {
@@ -166,11 +166,11 @@ describe("formatSessionDumpText markdown-headings transcript", () => {
 
 		const live = formatSubagentDumpText({
 			key: "Explore",
-			model: "anthropic/claude-sonnet",
+			model: "test/test-model",
 			thinkingLevel: "high",
 			messages: [{ role: "user", content: "explore task", timestamp: 2 }],
 		});
-		expect(live).toContain("Model: anthropic/claude-sonnet\nThinking Level: high\n");
+		expect(live).toContain("Model: test/test-model\nThinking Level: high\n");
 		expect(live).not.toContain("Status: aborted");
 	});
 

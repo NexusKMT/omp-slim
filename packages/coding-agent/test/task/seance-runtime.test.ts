@@ -148,7 +148,7 @@ describe("seance startup contracts", () => {
 		const sourceText = await writeSourceSession(sourceFile, cwd, [sourceRoot]);
 		const forked = await forkSeance(sourceFile, cwd, path.join(tempDir.path(), "forks", "seance.jsonl"));
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
+		if (!model) throw new Error("Expected test/test-model");
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
@@ -322,7 +322,7 @@ describe("seance startup contracts", () => {
 			const seanceAgent = getBundledAgent("seance");
 			if (!seanceAgent) throw new Error("Expected the bundled seance agent");
 			const model = createTestModel({ provider: "test", id: "test-model" });
-			if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
+			if (!model) throw new Error("Expected test/test-model");
 			const resolvedModel = `${model.provider}/${model.id}`;
 			const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {
 				agent: seanceAgent.systemPrompt,

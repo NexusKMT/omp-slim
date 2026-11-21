@@ -61,10 +61,10 @@ function expectAcpStructure(schema: Validator<unknown>, value: unknown): void {
 
 const TEST_MODELS: Model[] = [
 	buildModel({
-		id: "claude-sonnet-4-20250514",
-		name: "Claude Sonnet",
+		id: "test-model",
+		name: "Test Model",
 		api: "openai-completions",
-		provider: "anthropic",
+		provider: "test",
 		baseUrl: "https://example.invalid",
 		reasoning: true,
 		input: ["text", "image"],
@@ -73,10 +73,10 @@ const TEST_MODELS: Model[] = [
 		maxTokens: 8_192,
 	}),
 	buildModel({
-		id: "gpt-5.4",
-		name: "GPT-5.4",
+		id: "test-model-2",
+		name: "Test Model 2",
 		api: "openai-completions",
-		provider: "openai",
+		provider: "test2",
 		baseUrl: "https://example.invalid",
 		reasoning: true,
 		input: ["text", "image"],
@@ -106,8 +106,8 @@ function makeAssistantMessage(text: string, thinking?: string) {
 	return {
 		role: "assistant" as const,
 		content,
-		api: "anthropic-messages" as const,
-		provider: "anthropic" as const,
+		api: "openai-completions" as const,
+		provider: "test" as const,
 		model: TEST_MODELS[0].id,
 		usage: {
 			input: 10,
@@ -1083,7 +1083,7 @@ describe("ACP agent", () => {
 	});
 
 	it("suppresses lifetime config_option_update during the bootstrap window", async () => {
-		// Regression for codex review on #1060: an extension `session_start`
+		// Regression for review on #1060: an extension `session_start`
 		// handler calling `setThinkingLevel` must not push a
 		// `config_option_update` for a session id the client has not been told
 		// about yet (matches Zed's `Received session notification for unknown
@@ -1917,7 +1917,7 @@ describe("ACP agent", () => {
 
 	it("surfaces a provider error that reaches the client only via agent_end", async () => {
 		// A request that fails before streaming any assistant events (e.g.
-		// GitHub Copilot's HTTP 400 model_not_supported) emits no
+		// The provider's HTTP 400 model_not_supported) emits no
 		// message_update/message_end — only agent_end carrying an empty
 		// assistant message with errorMessage. The client must still see why
 		// the turn ended instead of a silent stop.
@@ -2025,8 +2025,8 @@ describe("ACP agent", () => {
 					arguments: { command: "npm test" },
 				},
 			],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: TEST_MODELS[0].id,
 			usage: {
 				input: 1,
@@ -2148,8 +2148,8 @@ describe("ACP agent", () => {
 					input: "raw custom payload",
 				},
 			] as unknown as Array<{ type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }>,
-			api: "openai-responses",
-			provider: "openai",
+			api: "openai-completions",
+			provider: "test",
 			model: TEST_MODELS[1].id,
 			usage: {
 				input: 1,
@@ -2197,8 +2197,8 @@ describe("ACP agent", () => {
 		stored.sessionManager.appendMessage({
 			role: "assistant",
 			content: [],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: TEST_MODELS[0].id,
 			usage: {
 				input: 0,
@@ -4023,13 +4023,13 @@ describe("ACP agent", () => {
 		it("translates input to a string elicitation and surfaces the placeholder as description", async () => {
 			const { connection, calls } = createElicitConnection(async () => ({
 				action: "accept",
-				content: { value: "claude" },
+				content: { value: "test" },
 			}));
 			const ctx = createAcpExtensionUiContext(connection, () => "session-input", FORM_CAPABILITIES);
 
-			const result = await ctx.input("Your name?", "e.g. claude");
+			const result = await ctx.input("Your name?", "e.g. test");
 
-			expect(result).toBe("claude");
+			expect(result).toBe("test");
 			expect(calls).toHaveLength(1);
 			const request = calls[0]!;
 			if (!isFormElicitation(request)) {
@@ -4038,7 +4038,7 @@ describe("ACP agent", () => {
 			expect(request.message).toBe("Your name?");
 			expect(request.requestedSchema.properties?.value).toEqual({
 				type: "string",
-				description: "e.g. claude",
+				description: "e.g. test",
 			});
 		});
 

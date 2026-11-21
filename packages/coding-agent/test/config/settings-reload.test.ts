@@ -46,12 +46,12 @@ describe("Settings layer refresh", () => {
 	}
 
 	it("rejects an on-disk value that fails validation and keeps the previous layers", async () => {
-		await writeConfig({ providers: { maxInFlightRequests: { openai: 2 } } });
+		await writeConfig({ providers: { maxInFlightRequests: { test: 2 } } });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
 
-		await writeConfig({ providers: { maxInFlightRequests: { openai: 0 } } });
+		await writeConfig({ providers: { maxInFlightRequests: { test: 0 } } });
 		await expect(settings.reloadFromDisk()).rejects.toThrow("Provider request limits must be positive numbers");
-		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 2 });
+		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ test: 2 });
 	});
 
 	it("reloads the persisted layers behind an overlay only when asked, keeping its own overrides", async () => {
@@ -70,18 +70,18 @@ describe("Settings layer refresh", () => {
 	});
 
 	it("never adopts an invalid on-disk value through the save that merges external edits", async () => {
-		await writeConfig({ providers: { maxInFlightRequests: { openai: 2 } } });
+		await writeConfig({ providers: { maxInFlightRequests: { test: 2 } } });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
-		await writeConfig({ providers: { maxInFlightRequests: { openai: 0 } } });
+		await writeConfig({ providers: { maxInFlightRequests: { test: 0 } } });
 		await expect(settings.reloadFromDisk()).rejects.toThrow("Provider request limits must be positive numbers");
 
 		cfgTemperature.set(settings, 0.5);
 		await settings.flush();
-		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 2 });
+		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ test: 2 });
 		expect(cfgTemperature.get(settings)).toBe(0.5);
 		// The file keeps the external edit for the user to fix, merged with the save.
 		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
-			providers: { maxInFlightRequests: { openai: 0 } },
+			providers: { maxInFlightRequests: { test: 0 } },
 			temperature: 0.5,
 		});
 	});
@@ -99,21 +99,21 @@ describe("Settings layer refresh", () => {
 		cfgTemperature.set(settings, 0.5);
 		const saving = settings.flush();
 		cfgCompactionEnabled.unset(settings);
-		cfgProvidersMaxInFlightRequests.set(settings, { openai: 3 });
+		cfgProvidersMaxInFlightRequests.set(settings, { test: 3 });
 		lock.release();
 		await saving;
 
 		expect(cfgCompactionEnabled.get(settings)).toBe(true);
-		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 3 });
+		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ test: 3 });
 		await settings.flush();
 		expect(seen).toEqual([
 			["temperature", 0.5],
 			["compaction.enabled", true],
-			["providers.maxInFlightRequests", { openai: 3 }],
+			["providers.maxInFlightRequests", { test: 3 }],
 		]);
 		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
 			temperature: 0.5,
-			providers: { maxInFlightRequests: { openai: 3 } },
+			providers: { maxInFlightRequests: { test: 3 } },
 		});
 	});
 
@@ -147,29 +147,29 @@ describe("Settings layer refresh", () => {
 			const storeDir = tempDir.join("store");
 			const storeConfig = path.join(storeDir, "config.yml");
 			fs.mkdirSync(storeDir);
-			fs.writeFileSync(storeConfig, YAML.stringify({ temperature: 0.1, model: "openai/base" }));
+			fs.writeFileSync(storeConfig, YAML.stringify({ temperature: 0.1, model: "test/base" }));
 			fs.symlinkSync(storeConfig, configPath());
 			fs.chmodSync(storeDir, 0o555);
 			const settings = await Settings.init({ cwd: startProject, agentDir });
 			try {
 				cfgTemperature.set(settings, 0.5);
-				settings.setModel("openai/session");
+				settings.setModel("test/session");
 				await expect(settings.flush()).rejects.toThrow();
 
 				// Every later reload (task preflight) must still succeed with the in-memory values.
 				await settings.reloadFromDisk();
 				await settings.reloadFromDisk();
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModel()).toBe("openai/session");
+				expect(settings.getModel()).toBe("test/session");
 
 				fs.chmodSync(storeDir, 0o755);
 				await settings.reloadFromDisk();
 				expect(YAML.parse(await Bun.file(storeConfig).text())).toEqual({
 					temperature: 0.5,
-					model: "openai/session",
+					model: "test/session",
 				});
 				expect(cfgTemperature.get(settings)).toBe(0.5);
-				expect(settings.getModel()).toBe("openai/session");
+				expect(settings.getModel()).toBe("test/session");
 			} finally {
 				fs.chmodSync(storeDir, 0o755);
 			}
@@ -177,7 +177,7 @@ describe("Settings layer refresh", () => {
 	);
 
 	it("keeps the last good global layer when a reload's save moves a malformed config aside", async () => {
-		await writeConfig({ temperature: 0.1, compaction: { enabled: false }, model: "openai/base" });
+		await writeConfig({ temperature: 0.1, compaction: { enabled: false }, model: "test/base" });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
 		cfgTemperature.set(settings, 0.5);
 		await Bun.write(configPath(), "temperature: [\n");
@@ -185,33 +185,33 @@ describe("Settings layer refresh", () => {
 		await settings.reloadFromDisk();
 		expect(cfgTemperature.get(settings)).toBe(0.5);
 		expect(cfgCompactionEnabled.get(settings)).toBe(false);
-		expect(settings.getModel()).toBe("openai/base");
+		expect(settings.getModel()).toBe("test/base");
 
 		await settings.flush();
 		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
 			temperature: 0.5,
 			compaction: { enabled: false },
-			model: "openai/base",
+			model: "test/base",
 		});
 	});
 
 	it("notifies listeners when a reload only reorders a precedence-sensitive record", async () => {
-		await writeConfig({ edit: { modelVariants: { claude: "patch", sonnet: "replace" } } });
+		await writeConfig({ edit: { modelVariants: { "test-model": "patch", "test-model-2": "replace" } } });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
 		const seen: string[][] = [];
 		cfgEditModelVariants.listen(settings, value => {
 			seen.push(Object.keys(value));
 		});
 
-		await writeConfig({ edit: { modelVariants: { sonnet: "replace", claude: "patch" } } });
+		await writeConfig({ edit: { modelVariants: { "test-model-2": "replace", "test-model": "patch" } } });
 		await settings.reloadFromDisk();
-		expect(Object.keys(cfgEditModelVariants.get(settings))).toEqual(["sonnet", "claude"]);
+		expect(Object.keys(cfgEditModelVariants.get(settings))).toEqual(["test-model-2", "test-model"]);
 		await Promise.resolve();
-		expect(seen).toEqual([["sonnet", "claude"]]);
+		expect(seen).toEqual([["test-model-2", "test-model"]]);
 	});
 
 	it("refuses to re-scope into a project whose settings fail validation", async () => {
-		writeProjectSettings(bareProject, { providers: { maxInFlightRequests: { openai: -1 } } });
+		writeProjectSettings(bareProject, { providers: { maxInFlightRequests: { test: -1 } } });
 		const settings = await Settings.init({ cwd: scopedProject, agentDir });
 		let notified = false;
 		cfgCompactionEnabled.listen(settings, () => {

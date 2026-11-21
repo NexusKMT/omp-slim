@@ -2,9 +2,9 @@ export function makeAssistantMessage() {
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text: "ok" }],
-		api: "anthropic-messages" as const,
+		api: "openai-completions" as const,
 		provider: "anthropic" as const,
-		model: "claude-sonnet-4-20250514",
+		model: "test-model",
 		usage: {
 			input: 1,
 			output: 1,

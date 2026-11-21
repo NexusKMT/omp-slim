@@ -19,7 +19,7 @@ describe("hook-provided compaction replay boundary", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -37,9 +37,9 @@ describe("hook-provided compaction replay boundary", () => {
 		const assistant = (text: string, timestamp: number) => ({
 			role: "assistant" as const,
 			content: [{ type: "text" as const, text }],
-			api: "anthropic-messages" as const,
-			provider: "anthropic" as const,
-			model: "claude-sonnet-4-5",
+			api: "openai-completions" as const,
+			provider: "test" as const,
+			model: "test-model",
 			stopReason: "stop" as const,
 			usage: {
 				input: 1000,
@@ -70,7 +70,7 @@ describe("hook-provided compaction replay boundary", () => {
 						tokensBefore: event.preparation.tokensBefore,
 						preserveData: {
 							openaiRemoteCompaction: {
-								provider: "openai",
+								provider: "test",
 								replacementHistory: [{ type: "compaction", encrypted_content: "enc" }],
 							},
 						},
@@ -80,8 +80,8 @@ describe("hook-provided compaction replay boundary", () => {
 			},
 			emitBeforeAgentStart: async () => undefined,
 		};
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
-		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
+		if (!bundled) throw new Error("Expected built-in test model to exist");
 		session = new AgentSession({
 			agent: new Agent({
 				initialState: { model: bundled, systemPrompt: ["Test"], tools: [], messages: [] },

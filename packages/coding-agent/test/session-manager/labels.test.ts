@@ -56,8 +56,8 @@ describe("SessionManager labels", () => {
 		const msg2Id = session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: "test",
 			usage: {
 				input: 1,
@@ -92,8 +92,8 @@ describe("SessionManager labels", () => {
 		const msg2Id = session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: "test",
 			usage: {
 				input: 1,

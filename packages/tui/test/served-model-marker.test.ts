@@ -11,8 +11,8 @@ function turn(parts: {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: parts.provider ?? "openrouter",
+		api: "openai-completions",
+		provider: parts.provider ?? "test",
 		model: parts.model,
 		...(parts.served ? { upstreamModel: parts.served } : {}),
 		...(parts.upstreamProvider ? { upstreamProvider: parts.upstreamProvider } : {}),
@@ -34,39 +34,39 @@ describe("detectServedModelMismatch", () => {
 		expect(
 			detectServedModelMismatch(
 				turn({
-					model: "anthropic/claude-opus-5",
-					served: "claude-haiku-4-5-20251001",
-					upstreamProvider: "Amazon Bedrock",
+					model: "test/test-model",
+					served: "test-model-2",
+					upstreamProvider: "Test Provider",
 				}),
 			),
 		).toEqual({
-			requested: "anthropic/claude-opus-5",
-			served: "claude-haiku-4-5-20251001",
-			provider: "openrouter",
-			upstreamProvider: "Amazon Bedrock",
+			requested: "test/test-model",
+			served: "test-model-2",
+			provider: "test",
+			upstreamProvider: "Test Provider",
 		});
 	});
 
 	it("flags a different revision of the same family", () => {
-		expect(detectServedModelMismatch(turn({ model: "claude-opus-4-6", served: "claude-opus-4-7" }))?.served).toBe(
-			"claude-opus-4-7",
+		expect(detectServedModelMismatch(turn({ model: "test-model", served: "test-model-2" }))?.served).toBe(
+			"test-model-2",
 		);
 	});
 
 	it("stays silent when no served id was recovered", () => {
-		expect(detectServedModelMismatch(turn({ model: "claude-fable-5-1" }))).toBeUndefined();
+		expect(detectServedModelMismatch(turn({ model: "test-model" }))).toBeUndefined();
 	});
 });
 
 describe("ServedModelTracker", () => {
 	it("reports each substitution pair once, and a new pair after a model switch", () => {
 		const tracker = new ServedModelTracker();
-		const swapped = turn({ model: "claude-opus-5", served: "claude-haiku-4-5" });
+		const swapped = turn({ model: "test-model", served: "test-model-2" });
 		expect(tracker.check(swapped)).toBeDefined();
 		expect(tracker.check(swapped)).toBeUndefined();
-		expect(tracker.check(turn({ model: "claude-opus-5", served: "claude-opus-5" }))).toBeUndefined();
-		expect(tracker.check(turn({ model: "claude-sonnet-5", served: "claude-haiku-4-5" }))?.requested).toBe(
-			"claude-sonnet-5",
+		expect(tracker.check(turn({ model: "test-model", served: "test-model" }))).toBeUndefined();
+		expect(tracker.check(turn({ model: "test-model-3", served: "test-model-2" }))?.requested).toBe(
+			"test-model-3",
 		);
 		expect(tracker.check(swapped)).toBeUndefined();
 	});

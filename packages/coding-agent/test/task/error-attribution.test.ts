@@ -12,8 +12,8 @@ describe("attributeSubagentError", () => {
 	});
 
 	it("uses the fallback text when the message is empty", () => {
-		expect(attributeSubagentError(undefined, { provider: "anthropic", model: "claude-sonnet-4-5" })).toBe(
-			"[anthropic/claude-sonnet-4-5] Subagent failed",
+		expect(attributeSubagentError(undefined, { provider: "test", model: "test-model" })).toBe(
+			"[test/test-model] Subagent failed",
 		);
 		expect(attributeSubagentError("   ", undefined)).toBe("Subagent failed");
 	});
@@ -29,12 +29,12 @@ describe("attributeSubagentError", () => {
 
 	it("skips the prefix when the message already names the provider", () => {
 		expect(
-			attributeSubagentError("Cursor stream ended before turnEnded", { provider: "cursor", model: "gpt-5" }),
+			attributeSubagentError("Cursor stream ended before turnEnded", { provider: "cursor", model: "test-model" }),
 		).toBe("Cursor stream ended before turnEnded");
 	});
 
 	it("attributes with a partial identity", () => {
-		expect(attributeSubagentError("boom", { model: "gpt-5" })).toBe("[gpt-5] boom");
-		expect(attributeSubagentError("boom", { provider: "openai" })).toBe("[openai] boom");
+		expect(attributeSubagentError("boom", { model: "test-model" })).toBe("[test-model] boom");
+		expect(attributeSubagentError("boom", { provider: "test" })).toBe("[test] boom");
 	});
 });

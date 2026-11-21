@@ -560,7 +560,7 @@ describe("Agent hub row ordering", () => {
 			status: "active",
 			lastUpdate: Date.now(),
 			progress: {
-				resolvedModel: "openai/gpt-4o",
+				resolvedModel: "test/test-model",
 				resolvedModelIsFallback: true,
 			} as never,
 		});
@@ -568,7 +568,7 @@ describe("Agent hub row ordering", () => {
 		const hub = makeHub(agents, { observers });
 
 		try {
-			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → openai/gpt-4o");
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → test/test-model");
 		} finally {
 			hub.dispose();
 		}
@@ -582,9 +582,9 @@ describe("Agent hub row ordering", () => {
 		// unproven, `model` already points at the candidate that has produced
 		// nothing — reporting it credits the run to a model that never spoke.
 		const session = {
-			model: { id: "gpt-5.6-sol", thinking: true },
+			model: { id: "test-model-2", thinking: true },
 			thinkingLevel: "high",
-			servingModel: { selector: "anthropic/claude-sonnet-5", isFallback: false },
+			servingModel: { selector: "test/test-model-3", isFallback: false },
 		} as unknown as AgentSession;
 		agents.register({ id: "MainAgent", displayName: "Main Agent", kind: "sub", session });
 
@@ -592,8 +592,8 @@ describe("Agent hub row ordering", () => {
 
 		try {
 			const rendered = Bun.stripANSI(hub.render(120).join("\n"));
-			expect(rendered).toContain("claude-sonnet-5");
-			expect(rendered).not.toContain("gpt-5.6-sol");
+			expect(rendered).toContain("test-model-3");
+			expect(rendered).not.toContain("test-model-2");
 			expect(rendered).not.toContain("fallback →");
 		} finally {
 			hub.dispose();
@@ -607,18 +607,18 @@ describe("Agent hub row ordering", () => {
 		// miscredit — but the row must still say the model was reached by a
 		// fallback rather than presenting it as the plain configured model.
 		const session = {
-			model: { id: "gpt-5.6-sol", thinking: true },
+			model: { id: "test-model-2", thinking: true },
 			thinkingLevel: "high",
 			// Nothing served, so the session names what it currently points at —
 			// still flagged as fallback-routed.
-			servingModel: { selector: "openai-codex/gpt-5.6-sol", isFallback: true },
+			servingModel: { selector: "test/test-model-2", isFallback: true },
 		} as unknown as AgentSession;
 		agents.register({ id: "UnprovenAgent", displayName: "Unproven Agent", kind: "sub", session });
 
 		const hub = makeHub(agents, { observers: new SessionObserverRegistry() });
 
 		try {
-			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → openai-codex/gpt-5.6-sol");
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → test/test-model-2");
 		} finally {
 			hub.dispose();
 		}
@@ -628,10 +628,10 @@ describe("Agent hub row ordering", () => {
 		geometry = stubStdoutGeometry(120);
 		const agents = new AgentRegistry();
 		// Live session with a resolved model but no served fallback — the
-		// Fireworks Fast → base degrade emits `retry_fallback_applied` without
+		// fast → base degrade emits `retry_fallback_applied` without
 		// arming `#activeRetryFallback`, so the badge must fall back to the
 		// executor-reported progress flag.
-		const session = { model: { id: "kimi-k2" }, servingModel: undefined } as unknown as AgentSession;
+		const session = { model: { id: "test-model" }, servingModel: undefined } as unknown as AgentSession;
 		agents.register({ id: "FastAgent", displayName: "Fast Agent", kind: "sub", session });
 
 		const observers = new SessionObserverRegistry();
@@ -642,7 +642,7 @@ describe("Agent hub row ordering", () => {
 			status: "active",
 			lastUpdate: Date.now(),
 			progress: {
-				resolvedModel: "fireworks/kimi-k2",
+				resolvedModel: "test/test-model",
 				resolvedModelIsFallback: true,
 			} as never,
 		});
@@ -650,7 +650,7 @@ describe("Agent hub row ordering", () => {
 		const hub = makeHub(agents, { observers });
 
 		try {
-			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → fireworks/kimi-k2");
+			expect(Bun.stripANSI(hub.render(120).join("\n"))).toContain("fallback → test/test-model");
 		} finally {
 			hub.dispose();
 		}
@@ -681,7 +681,7 @@ describe("Agent hub row ordering", () => {
 				label: "Inherited level",
 				status: "active",
 				lastUpdate: Date.now(),
-				progress: { resolvedModel: "openai/gpt-5.4" } as never,
+				progress: { resolvedModel: "test/test-model" } as never,
 			},
 			{
 				id: "ExplicitLevel",
@@ -689,18 +689,18 @@ describe("Agent hub row ordering", () => {
 				label: "Explicit level",
 				status: "active",
 				lastUpdate: Date.now(),
-				progress: { resolvedModel: "openai/gpt-5.4:low" } as never,
+				progress: { resolvedModel: "test/test-model:low" } as never,
 			},
 		]);
 		const hub = makeHub(agents, { observers });
 
 		try {
 			const inherited = renderedRosterEntry(hub, "InheritedLevel", 140);
-			expect(inherited).toContain("gpt-5.4");
+			expect(inherited).toContain("test-model");
 			expect(inherited).toContain(theme.thinking.high);
 
 			const explicit = renderedRosterEntry(hub, "ExplicitLevel", 140);
-			expect(explicit).toContain("gpt-5.4");
+			expect(explicit).toContain("test-model");
 			expect(explicit).toContain(theme.thinking.low);
 			expect(explicit).not.toContain(theme.thinking.high);
 		} finally {
@@ -753,7 +753,7 @@ describe("Agent hub row ordering", () => {
 					contextWindow: 128_000,
 					cost: 0.2134,
 					durationMs: 134_000,
-					resolvedModel: "openai/gpt-5.4:high",
+					resolvedModel: "test/test-model:high",
 				} as never,
 			},
 		]);

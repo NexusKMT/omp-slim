@@ -609,7 +609,7 @@ describe("StdinBuffer", () => {
 		});
 
 		it("coalesces an unbracketed CR-delimited burst into one paste instead of per-line submits", () => {
-			// Codex desktop delivers Cmd+V without \x1b[200~…\x1b[201~ markers, so
+			// The desktop app delivers Cmd+V without \x1b[200~…\x1b[201~ markers, so
 			// each interior CR would otherwise fire a submit and split the block.
 			processInput("line 1\rline 2\rline 3");
 			expect(emittedPaste).toEqual(["line 1\rline 2\rline 3"]);

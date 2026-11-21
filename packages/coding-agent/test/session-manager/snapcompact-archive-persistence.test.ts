@@ -64,9 +64,9 @@ describe("snapcompact archive persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,

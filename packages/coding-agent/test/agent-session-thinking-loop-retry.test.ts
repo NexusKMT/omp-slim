@@ -73,7 +73,7 @@ describe("AgentSession thinking-loop retry", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("openrouter", "openrouter-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -90,7 +90,7 @@ describe("AgentSession thinking-loop retry", () => {
 	});
 
 	it("starts retry for thinking-loop errorId even without transient wording", async () => {
-		const model = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const calls: string[] = [];
 		const agent = new Agent({
 			getApiKey: requestedModel => `${requestedModel.provider}-test-key`,
@@ -130,7 +130,7 @@ describe("AgentSession thinking-loop retry", () => {
 		await session.prompt("Trigger errorId-only loop once");
 		await session.waitForIdle();
 
-		expect(calls).toEqual(["openrouter/google/gemini-3.5-flash", "openrouter/google/gemini-3.5-flash"]);
+		expect(calls).toEqual(["test/test-model", "test/test-model"]);
 		expect(retryStartEvents).toHaveLength(1);
 		expect(AIError.is(retryStartEvents[0].errorId, AIError.Flag.ThinkingLoop)).toBe(true);
 		const assistants = session.agent.state.messages.filter(
@@ -141,7 +141,7 @@ describe("AgentSession thinking-loop retry", () => {
 	});
 
 	it("injects a redirect notice into the retried turn after a thinking loop", async () => {
-		const model = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const calls: string[] = [];
 		const contexts: Context[] = [];
 		const agent = new Agent({
@@ -208,7 +208,7 @@ describe("AgentSession thinking-loop retry", () => {
 	});
 
 	it("injects a redirect notice on each consecutive thinking-loop retry", async () => {
-		const model = createMockModel({ provider: "openrouter", id: "google/gemini-3.5-flash" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const calls: string[] = [];
 		const contexts: Context[] = [];
 		const agent = new Agent({

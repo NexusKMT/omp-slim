@@ -89,8 +89,8 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 	});
 
 	function modelOrThrow(registry: ModelRegistry, id: string): Model<Api> {
-		const model = registry.find("anthropic", id);
-		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
+		const model = registry.find("test", id);
+		if (!model) throw new Error(`Expected test model ${id} to exist`);
 		return model;
 	}
 
@@ -101,7 +101,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 	 *  entries still have built-in provenance after extension shadowing. */
 	function createHarness(settings: Settings, options: HarnessOptions = {}): InteractiveMode {
 		const modelsPath = path.join(tempDir.path(), `models-${Bun.nanoseconds()}.yml`);
-		// The slim catalog ships no bundled models; resolve the anthropic models
+		// The slim catalog ships no bundled models; resolve the test models
 		// against a synthetic openai-completions provider instead.
 		const modelSpec = (id: string) => ({
 			id,
@@ -116,20 +116,20 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 			modelsPath,
 			JSON.stringify({
 				providers: {
-					anthropic: {
+					test: {
 						baseUrl: "https://example.invalid/v1",
 						api: "openai-completions",
 						models: [
-							modelSpec("claude-sonnet-4-5"),
-							modelSpec("claude-sonnet-4-6"),
-							modelSpec("claude-haiku-4-5"),
+							modelSpec("test-model"),
+							modelSpec("test-model-2"),
+							modelSpec("test-model-3"),
 						],
 					},
 				},
 			}),
 		);
 		const registry = new ModelRegistry(authStorage, modelsPath);
-		const initialModel = modelOrThrow(registry, "claude-sonnet-4-5");
+		const initialModel = modelOrThrow(registry, "test-model");
 		const readTool = makeTool("read");
 		// AgentSession requires a Map-typed tool registry; `read` is the initial
 		// active tool. Plan approval is a `write` to xd://propose, so plan-mode
@@ -453,7 +453,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		);
 		await created.init({ suppressWelcomeIntro: true });
 		expect(created.planModeEnabled).toBe(true);
-		expect(session?.model?.id).toBe("claude-sonnet-4-5");
+		expect(session?.model?.id).toBe("test-model");
 		const previousSessionFile = session?.sessionFile;
 
 		await created.handleClearCommand();
@@ -465,7 +465,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		expect(session?.getPlanModeState()).toBeUndefined();
 		expect(session?.peekPlanProposalHandler()).toBeUndefined();
 		expect(session?.getActiveToolNames()).toEqual(["read"]);
-		expect(session?.model?.id).toBe("claude-sonnet-4-5");
+		expect(session?.model?.id).toBe("test-model");
 	});
 
 	it("re-enters plan mode in the session /new starts when plan.defaultOnStartup is on (issue #15627)", async () => {
@@ -510,7 +510,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 			path.join(tempDir.path(), `startup-decision-${Bun.nanoseconds()}`),
 		);
 		try {
-			manager.appendModelChange("anthropic/claude-sonnet-4-5");
+			manager.appendModelChange("test/test-model");
 			manager.appendThinkingLevelChange("medium");
 			manager.appendCustomEntry("my-extension-state", { foo: "bar" });
 			expect(shouldEnterPlanModeOnStartup(manager, enabled)).toBe(true);
@@ -530,16 +530,16 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		const created = createHarness(
 			Settings.isolated({
 				"compaction.enabled": false,
-				modelRoles: { plan: "anthropic/claude-sonnet-4-6" },
+				modelRoles: { plan: "test/test-model-2" },
 			}),
 		);
-		created.sessionManager.appendModelChange("anthropic/claude-sonnet-4-5");
+		created.sessionManager.appendModelChange("test/test-model");
 		created.sessionManager.appendModeChange("plan", { planFilePath: "local://PLAN.md" });
 		created.sessionManager.appendMessage({ role: "user", content: "prior plan turn", timestamp: Date.now() });
 
 		await created.init({ suppressWelcomeIntro: true });
 
 		expect(created.planModeEnabled).toBe(true);
-		expect(session?.model?.id).toBe("claude-sonnet-4-5");
+		expect(session?.model?.id).toBe("test-model");
 	});
 });

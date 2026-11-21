@@ -52,7 +52,7 @@ describe("isDefinitiveOAuthFailure", () => {
 			"ETIMEDOUT",
 			"socket hang up",
 			"network error",
-			"OAuth token refresh timed out for provider: anthropic",
+			"OAuth token refresh timed out for provider: test",
 		]) {
 			expect(isDefinitiveOAuthFailure(msg)).toBe(false);
 		}

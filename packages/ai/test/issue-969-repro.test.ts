@@ -19,8 +19,8 @@ function createSseResponse(events: unknown[]): Response {
 
 function customOpenAICompatModel(): Model<"openai-completions"> {
 	return buildModel({
-		id: "gpt-5.1",
-		name: "GPT-5.1 proxy",
+		id: "test-model",
+		name: "Test Model proxy",
 		api: "openai-completions",
 		provider: "custom",
 		baseUrl: "https://proxy.example.com/v1",
@@ -37,7 +37,7 @@ function customOpenAICompatModel(): Model<"openai-completions"> {
 }
 
 describe("issue #969 — custom thinking metadata must preserve explicit xhigh", () => {
-	it("uses the configured xhigh effort for custom OpenAI-compatible models", async () => {
+	it("uses the configured xhigh effort for custom provider-compatible models", async () => {
 		const model = customOpenAICompatModel();
 		let payload: Record<string, unknown> | undefined;
 		const fetchMock: FetchImpl = Object.assign(

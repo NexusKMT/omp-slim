@@ -200,7 +200,7 @@ describe("EventController — ending the wait on a real session", () => {
 	it("folds a job result that lands after the wait was ended into context without starting a turn", async () => {
 		tempDir = TempDir.createSync("@pi-async-wait-esc-");
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 		const mock = createMockModel({
 			responses: [{ content: ["job started"], stopReason: "stop" }],
 			handler: () => ({ content: ["woke up after the job"], stopReason: "stop" }),

@@ -9,11 +9,11 @@ import { createReportBundle } from "@oh-my-pi/pi-coding-agent/debug/report-bundl
 import { getConfigRootDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
 const model: Model<"openai-completions"> = buildModel({
-	id: "claude-test",
-	name: "Claude Test",
+	id: "test-model",
+	name: "Test Model",
 	api: "openai-completions",
-	provider: "anthropic",
-	baseUrl: "https://api.anthropic.com",
+	provider: "test",
+	baseUrl: "https://example.invalid",
 	reasoning: true,
 	input: ["text"],
 	cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },

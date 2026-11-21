@@ -40,7 +40,7 @@ describe("AgentSession tool-call loop guard", () => {
 	});
 
 	it("injects a hidden redirect before the next model call", async () => {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 		const bashTool: AgentTool = {

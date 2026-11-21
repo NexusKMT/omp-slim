@@ -219,16 +219,16 @@ describe("settings registry", () => {
 	});
 
 	it("treats a reordered record as a change, since record order carries precedence", async () => {
-		const settings = Settings.isolated({ "edit.modelVariants": { claude: "patch", sonnet: "replace" } });
+		const settings = Settings.isolated({ "edit.modelVariants": { "test-model": "patch", "test-model-2": "replace" } });
 		const seen: string[][] = [];
 		cfgEditModelVariants.listen(settings, value => {
 			seen.push(Object.keys(value));
 		});
 
-		cfgEditModelVariants.override(settings, { sonnet: "replace", claude: "patch" });
-		expect(Object.keys(cfgEditModelVariants.get(settings))).toEqual(["sonnet", "claude"]);
+		cfgEditModelVariants.override(settings, { "test-model-2": "replace", "test-model": "patch" });
+		expect(Object.keys(cfgEditModelVariants.get(settings))).toEqual(["test-model-2", "test-model"]);
 		await tick();
-		expect(seen).toEqual([["sonnet", "claude"]]);
+		expect(seen).toEqual([["test-model-2", "test-model"]]);
 	});
 
 	it("releases a soft-pinned default on a global write or unset of that setting", () => {
@@ -390,10 +390,10 @@ describe("settings registry", () => {
 	it("migrates, normalizes, and validates constructor overrides like handle writes", () => {
 		expect(cfgSteeringMode.get(Settings.isolated({ queueMode: "all" }))).toBe("all");
 		expect(
-			cfgProvidersMaxInFlightRequests.get(Settings.isolated({ "providers.maxInFlightRequests": { openai: 2.7 } })),
-		).toEqual({ openai: 2 });
-		expect(() => Settings.isolated({ "providers.maxInFlightRequests": { openai: 0 } })).toThrow(
-			"Provider request limits must be positive numbers: openai",
+			cfgProvidersMaxInFlightRequests.get(Settings.isolated({ "providers.maxInFlightRequests": { test: 2.7 } })),
+		).toEqual({ test: 2 });
+		expect(() => Settings.isolated({ "providers.maxInFlightRequests": { test: 0 } })).toThrow(
+			"Provider request limits must be positive numbers: test",
 		);
 		expect(() =>
 			Settings.isolated().overlay({ "task.agentCompactionThresholdOverrides": { scout: "eighty" } }),

@@ -16,7 +16,7 @@ import * as path from "node:path";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 // Extensions need to know which agent they run in: the same factory is rebound to every
-// subagent, and hooks such as a Claude-style SubagentStart must act only there.
+// subagent, and hooks such as a provider-style SubagentStart must act only there.
 describe("ExtensionContext.agent", () => {
 	let tempDir: string;
 	const authStorages: AuthStorage[] = [];

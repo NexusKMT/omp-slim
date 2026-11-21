@@ -29,7 +29,7 @@ import {
 
 // Cache-stability invariant: when MCP servers reconnect with byte-identical tool
 // definitions, `refreshMCPTools` must not rebuild the system prompt. A rebuild
-// invalidates the Anthropic prompt-cache breakpoint placed on the system block
+// invalidates the prompt-cache breakpoint placed on the system block
 // and forces a full prefix re-encode on the next request.
 
 function createModel(): Model<"openai-completions"> {
@@ -37,7 +37,7 @@ function createModel(): Model<"openai-completions"> {
 		id: "mock",
 		name: "mock",
 		api: "openai-completions",
-		provider: "openai",
+		provider: "test",
 		baseUrl: "https://example.invalid",
 		reasoning: false,
 		input: ["text"],
@@ -872,7 +872,7 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 
 	it("rebuilds when an MCP tool's customWireName changes", async () => {
 		// `customWireName` overrides the model-facing tool name (e.g. `edit` exposes
-		// itself as `apply_patch` to GPT-5). The wire name is rendered into the prompt
+		// itself as `apply_patch` to a test model). The wire name is rendered into the prompt
 		// body via `toolPromptNames`, so a wire-name flip with the rest of the metadata
 		// constant would otherwise leave a stale system prompt that advertises the wrong
 		// callable name to the model. The signature must catch this.

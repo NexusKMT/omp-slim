@@ -32,7 +32,7 @@ describe("Context usage consolidation", () => {
 		await initTheme();
 
 		mockModel = createMockModel({
-			id: "gpt-mock",
+			id: "test-model",
 			provider: "test",
 			contextWindow: 100_000,
 			responses: [

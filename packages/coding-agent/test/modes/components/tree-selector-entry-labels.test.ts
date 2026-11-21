@@ -31,9 +31,9 @@ const userEntry: SessionEntry = {
 // One of every entry type the tree used to render as an empty string.
 const bookkeeping: SessionEntry[] = [
 	{ ...base("title", "u1"), type: "title_change", title: "fork cleanup", source: "user" },
-	{ ...base("pin", "title"), type: "credential_pin", provider: "anthropic", hash: "abc123" },
+	{ ...base("pin", "title"), type: "credential_pin", provider: "test", hash: "abc123" },
 	{ ...base("mode", "pin"), type: "mode_change", mode: "plan" },
-	{ ...base("tier", "mode"), type: "service_tier_change", serviceTier: { claude: "priority" } },
+	{ ...base("tier", "mode"), type: "service_tier_change", serviceTier: { test: "priority" } },
 	{ ...base("tier-off", "tier"), type: "service_tier_change", serviceTier: null },
 	{ ...base("ttsr", "tier-off"), type: "ttsr_injection", injectedRules: ["prefer-bun"] },
 	{ ...base("reset", "ttsr"), type: "reset_boundary" },
@@ -49,9 +49,9 @@ const bookkeeping: SessionEntry[] = [
 		type: "model_usage",
 		purpose: "auto\nthinking",
 		role: "smol\trole",
-		api: "anthropic-messages",
-		provider: "\x1b[31manthropic\x1b[0m",
-		model: "claude\nhaiku",
+		api: "openai-completions",
+		provider: "\x1b[31mtest\x1b[0m",
+		model: "test-model\nlite",
 		usage: {
 			input: 1,
 			output: 1,
@@ -90,12 +90,12 @@ describe("tree selector entry labels", () => {
 		selector.handleInput(ALT_A);
 		const rows = visibleRows(selector).join("\n");
 		expect(rows).toContain("[title: fork cleanup]");
-		expect(rows).toContain("[credential pin: anthropic]");
+		expect(rows).toContain("[credential pin: test]");
 		expect(rows).toContain("[mode: plan]");
-		expect(rows).toContain("[service tier: claude:priority]");
+		expect(rows).toContain("[service tier: test:priority]");
 		// A cleared tier is a real transition, so it says so rather than "null".
 		expect(rows).toContain("[service tier: (default)]");
-		expect(rows).toContain("[model usage: auto thinking smol role anthropic/claude haiku]");
+		expect(rows).toContain("[model usage: auto thinking smol role test/test-model lite]");
 		expect(rows).not.toContain("\x1b[31m");
 	});
 
@@ -111,8 +111,8 @@ describe("tree selector entry labels", () => {
 	it("searches bookkeeping entries by their rendered content", () => {
 		for (const [query, expected] of [
 			["fork", "[title: fork cleanup]"],
-			["anthropic", "[credential pin: anthropic]"],
-			["priority", "[service tier: claude:priority]"],
+			["test", "[credential pin: test]"],
+			["priority", "[service tier: test:priority]"],
 		]) {
 			const selector = selectorFor([userEntry, ...bookkeeping]);
 			selector.handleInput(ALT_A);

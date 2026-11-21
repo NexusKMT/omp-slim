@@ -14,9 +14,9 @@ function assistantMessage(overrides?: Partial<AssistantMessage>): AssistantMessa
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "ok" }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4.5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 10,
 			output: 50,

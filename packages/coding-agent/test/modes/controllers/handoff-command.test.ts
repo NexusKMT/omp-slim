@@ -267,7 +267,7 @@ describe("/handoff command", () => {
 		// "Handoff cancelled". session.handoff() now normalizes genuine cancellations
 		// to the exact "Handoff cancelled" message and re-throws real provider failures
 		// verbatim, so the controller must report those as a failure.
-		const providerError = new Error("Deepseek stream stalled");
+		const providerError = new Error("Provider stream stalled");
 		providerError.name = "AbortError";
 		const showError = vi.fn();
 		const statusContainer = createContainer();
@@ -297,7 +297,7 @@ describe("/handoff command", () => {
 		await controller.handleHandoffCommand();
 
 		expect(showError).toHaveBeenCalledTimes(1);
-		expect(showError).toHaveBeenCalledWith("Handoff failed: Deepseek stream stalled");
+		expect(showError).toHaveBeenCalledWith("Handoff failed: Provider stream stalled");
 	});
 
 	it("refuses to hand off while a response is streaming", async () => {

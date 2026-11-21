@@ -33,8 +33,8 @@ const pendingAssistant: AssistantMessage = {
 			arguments: { command: "bun run check:ts" },
 		},
 	],
-	api: "anthropic-messages",
-	provider: "anthropic",
+	api: "openai-completions",
+	provider: "test",
 	model: "mock",
 	usage: {
 		input: 0,
@@ -68,7 +68,7 @@ describe("session exit diagnostics", () => {
 		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const agent = new Agent({
 			initialState: {
@@ -147,7 +147,7 @@ describe("session exit diagnostics", () => {
 		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const agent = new Agent({
 			initialState: {
@@ -214,7 +214,7 @@ describe("session exit diagnostics", () => {
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const sessionFile = sessionManager.getSessionFile();
 		if (!sessionFile) throw new Error("Expected persistent session file path");

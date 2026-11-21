@@ -106,7 +106,7 @@ let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
 	// The resolver memoizes per provider for the lifetime of the process;
-	// earlier files (e.g. openai-responses-sampling-params) drain real
+	// earlier files (e.g. responses-sampling-params) drain real
 	// providers with no proxy env set, which would otherwise cache
 	// `undefined` past the env writes below.
 	__resetProxyCache();
@@ -133,8 +133,8 @@ describe("getProxyForProvider", () => {
 	});
 
 	it("normalizes hyphenated provider ids to underscores", () => {
-		Bun.env.PI_PROXY_GITHUB_COPILOT = PROXY;
-		expect(getProxyForProvider("github-copilot")).toBe(PROXY);
+		Bun.env.PI_PROXY_TEST_PROV = PROXY;
+		expect(getProxyForProvider("test-prov")).toBe(PROXY);
 	});
 
 	it("falls back to the generic PI_PROXY when no provider-specific var is set", () => {
@@ -158,10 +158,10 @@ describe("getProxyForUrl", () => {
 		Bun.env.HTTPS_PROXY = "http://secure-proxy:8080";
 		Bun.env.HTTP_PROXY = "http://plain-proxy:8080";
 
-		expect(getProxyForUrl("standard-secure-proxy", new URL("wss://api.openai.com/v1/live"))).toBe(
+		expect(getProxyForUrl("standard-secure-proxy", new URL("wss://api.example.invalid/v1/live"))).toBe(
 			"http://secure-proxy:8080",
 		);
-		expect(getProxyForUrl("standard-plain-proxy", new URL("ws://api.openai.com/v1/live"))).toBe(
+		expect(getProxyForUrl("standard-plain-proxy", new URL("ws://api.example.invalid/v1/live"))).toBe(
 			"http://plain-proxy:8080",
 		);
 	});
@@ -169,14 +169,14 @@ describe("getProxyForUrl", () => {
 	it("falls back to ALL_PROXY", () => {
 		Bun.env.ALL_PROXY = PROXY;
 
-		expect(getProxyForUrl("standard-all-proxy", new URL("wss://api.openai.com/v1/live"))).toBe(PROXY);
+		expect(getProxyForUrl("standard-all-proxy", new URL("wss://api.example.invalid/v1/live"))).toBe(PROXY);
 	});
 
 	it("bypasses configured proxies for NO_PROXY targets", () => {
 		Bun.env.PI_PROXY_NO_PROXY_TEST = PROXY;
-		Bun.env.NO_PROXY = "api.openai.com";
+		Bun.env.NO_PROXY = "api.example.invalid";
 
-		expect(getProxyForUrl("no-proxy-test", new URL("wss://api.openai.com/v1/live"))).toBeUndefined();
+		expect(getProxyForUrl("no-proxy-test", new URL("wss://api.example.invalid/v1/live"))).toBeUndefined();
 	});
 });
 
@@ -227,7 +227,7 @@ describe("shouldBypassProxy NO_PROXY rules", () => {
 	it("matches an exact host", () => {
 		Bun.env.NO_PROXY = "api.sakana.ai";
 		expect(shouldBypassProxy(new URL("https://api.sakana.ai/v1"))).toBe(true);
-		expect(shouldBypassProxy(new URL("https://api.openai.com/v1"))).toBe(false);
+		expect(shouldBypassProxy(new URL("https://api.example.invalid/v1"))).toBe(false);
 	});
 
 	it("matches a leading-dot suffix and the bare domain", () => {
@@ -243,7 +243,7 @@ describe("shouldBypassProxy NO_PROXY rules", () => {
 
 	it("bypasses everything for the wildcard rule", () => {
 		Bun.env.NO_PROXY = "*";
-		expect(shouldBypassProxy(new URL("https://api.openai.com/v1"))).toBe(true);
+		expect(shouldBypassProxy(new URL("https://api.example.invalid/v1"))).toBe(true);
 	});
 
 	it("honors a port qualifier on the rule", () => {
@@ -288,7 +288,7 @@ describe("wrapFetchForProxy", () => {
 	it("does not route one provider's request through another provider's proxy", async () => {
 		Bun.env.PI_PROXY_SAKANA = PROXY;
 		const { fetch, calls } = makeCapture();
-		await wrapFetchForProxy(fetch, "wrap-other")("https://api.openai.com/v1");
+		await wrapFetchForProxy(fetch, "wrap-other")("https://api.example.invalid/v1");
 		expect(calls[0].proxy).toBeUndefined();
 	});
 
@@ -324,7 +324,7 @@ describe("installGlobalProxyFetch", () => {
 	it("routes bare global fetch through PI_PROXY", async () => {
 		Bun.env.PI_PROXY = PROXY;
 		installGlobalProxyFetch();
-		await fetch("https://api.anthropic.com/v1/oauth/token", { method: "POST" });
+		await fetch("https://api.example.invalid/v1/oauth/token", { method: "POST" });
 		expect(calls[0].proxy).toBe(PROXY);
 	});
 
@@ -332,7 +332,7 @@ describe("installGlobalProxyFetch", () => {
 		const before = globalThis.fetch;
 		installGlobalProxyFetch();
 		expect(globalThis.fetch).toBe(before);
-		await fetch("https://api.anthropic.com/v1/oauth/token");
+		await fetch("https://api.example.invalid/v1/oauth/token");
 		expect(calls[0].proxy).toBeUndefined();
 	});
 
@@ -340,7 +340,7 @@ describe("installGlobalProxyFetch", () => {
 		Bun.env.PI_PROXY = PROXY;
 		Bun.env.PI_PROXY_GLOBAL_PREC = "http://127.0.0.1:24561";
 		installGlobalProxyFetch();
-		await wrapFetchForProxy(globalThis.fetch, "global-prec")("https://api.anthropic.com/v1/messages");
+		await wrapFetchForProxy(globalThis.fetch, "global-prec")("https://api.example.invalid/v1/messages");
 		expect(calls[0].proxy).toBe("http://127.0.0.1:24561");
 	});
 

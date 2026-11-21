@@ -156,7 +156,7 @@ describe("focused subagent view slash commands", () => {
 		const setFocusedThinking = vi.fn();
 		const setMainThinking = vi.fn();
 		Object.assign(focused.raw.viewSession, {
-			model: { provider: "anthropic", id: "claude-sonnet", reasoning: true },
+			model: { provider: "test", id: "test-model", reasoning: true },
 			getAvailableEffortSelectors: () => ["off", "auto", "low", "medium", "high"],
 			setThinkingLevel: setFocusedThinking,
 		});
@@ -178,7 +178,7 @@ describe("focused subagent view slash commands", () => {
 	});
 
 	it("keeps the mutating /usage reset form gated to the main session", async () => {
-		for (const text of ["/usage reset", "/usage reset anthropic/active"]) {
+		for (const text of ["/usage reset", "/usage reset test/active"]) {
 			const { raw, editor } = await submit(text);
 			expect(raw.showResetUsageSelector).not.toHaveBeenCalled();
 			expect(raw.handleUsageCommand).not.toHaveBeenCalled();

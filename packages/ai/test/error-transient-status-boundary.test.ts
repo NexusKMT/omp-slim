@@ -15,7 +15,7 @@ describe("transient status classification", () => {
 		"raw-http-request=/home/u/.omp/logs/http-400-requests/1787022540720-3o503gxo48bvb.json";
 
 	it("does not call a 400 transient because an artifact id embeds a status code", () => {
-		const id = AIError.classify(new Error(overflowWithArtifactPointer), "anthropic-messages");
+		const id = AIError.classify(new Error(overflowWithArtifactPointer), "openai-completions");
 		expect(AIError.is(id, AIError.Flag.ContextOverflow)).toBe(true);
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
 	});
@@ -27,19 +27,19 @@ describe("transient status classification", () => {
 			"HTTP 429 from provider",
 			"auth-gateway 524: <none>",
 		]) {
-			const id = AIError.classify(new Error(text), "anthropic-messages");
+			const id = AIError.classify(new Error(text), "openai-completions");
 			expect(AIError.is(id, AIError.Flag.Transient)).toBe(true);
 		}
 	});
 
 	it("keeps a namespaced gateway 4xx terminal", () => {
-		const id = AIError.classify(new Error("auth-gateway 404: not found"), "anthropic-messages");
+		const id = AIError.classify(new Error("auth-gateway 404: not found"), "openai-completions");
 		expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
 	});
 
 	it("does not treat status digits inside an identifier as transient", () => {
-		for (const text of ["model gpt-500x rejected the request", "request req500502 failed validation"]) {
-			const id = AIError.classify(new Error(text), "anthropic-messages");
+		for (const text of ["model test-500x rejected the request", "request req500502 failed validation"]) {
+			const id = AIError.classify(new Error(text), "openai-completions");
 			expect(AIError.is(id, AIError.Flag.Transient)).toBe(false);
 		}
 	});

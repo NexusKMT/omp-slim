@@ -65,7 +65,7 @@ function reply(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		usage: {

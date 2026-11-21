@@ -1,7 +1,7 @@
 /**
  * EventController error-banner wiring.
  *
- * A turn that ends on a provider error (e.g. Anthropic's "Output blocked by
+ * A turn that ends on a provider error (e.g. a provider's "Output blocked by
  * content filtering policy") must pin a persistent banner above the editor via
  * `ctx.showPinnedError`, and the banner must be cleared at the next turn's
  * `agent_start` via `ctx.clearPinnedError`. Aborts and normal stops must NOT
@@ -26,9 +26,9 @@ function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): Assist
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "draft" }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage: {
 			input: 0,

@@ -3168,11 +3168,11 @@ function b() {
 		it("should group files under directory headings", async () => {
 			const nestedDir = path.join(testDir, "packages", "ai");
 			fs.mkdirSync(nestedDir, { recursive: true });
-			fs.writeFileSync(path.join(nestedDir, "CHANGELOG.md"), "Claude Opus\n");
-			fs.writeFileSync(path.join(nestedDir, "models.json"), '{ "name": "Claude Opus" }\n');
+			fs.writeFileSync(path.join(nestedDir, "CHANGELOG.md"), "Test Model\n");
+			fs.writeFileSync(path.join(nestedDir, "models.json"), '{ "name": "Test Model" }\n');
 
 			const result = await searchTool.execute("test-call-15-directory-headings", {
-				pattern: "Claude Opus",
+				pattern: "Test Model",
 				path: testDir,
 			});
 

@@ -77,11 +77,11 @@ describe("/seance", () => {
 			) => {
 				onUpdate?.(
 					taskResult({
-						progress: [{ id: "progress-id", resolvedModel: "openai/actual-model" } as never],
+						progress: [{ id: "progress-id", resolvedModel: "test/test-model" } as never],
 					}),
 				);
 				return taskResult({
-					results: [{ id: "fast-result-id", exitCode: 0, resolvedModel: "openai/actual-model" } as never],
+					results: [{ id: "fast-result-id", exitCode: 0, resolvedModel: "test/test-model" } as never],
 				});
 			},
 		);
@@ -97,7 +97,7 @@ describe("/seance", () => {
 		expect(ctx.showModelSelector).not.toHaveBeenCalled();
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("fast-result-id"));
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("progress-id"));
-		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("openai/actual-model"));
+		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("test/test-model"));
 	});
 	it("surfaces live async progress IDs and resolved model", async () => {
 		const resolved = sourceSession("/repo/.omp/sessions/async.jsonl");
@@ -109,7 +109,7 @@ describe("/seance", () => {
 		const ctx = createInteractiveModeContext();
 		const snapshot = taskResult({
 			async: { state: "running", jobId: "seance-job", type: "task" },
-			progress: [{ id: "live-seance-id", resolvedModel: "anthropic/actual-model" } as never],
+			progress: [{ id: "live-seance-id", resolvedModel: "test/test-model" } as never],
 		});
 		const execute = vi.fn(
 			async (
@@ -128,7 +128,7 @@ describe("/seance", () => {
 
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("Seance running"));
 		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("live-seance-id"));
-		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("anthropic/actual-model"));
+		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("test/test-model"));
 	});
 	it("keeps the latest defined streamed model when the settled result omits one", async () => {
 		const resolved = sourceSession("/repo/.omp/sessions/streamed-model.jsonl");
@@ -147,12 +147,12 @@ describe("/seance", () => {
 			) => {
 				onUpdate?.(
 					taskResult({
-						progress: [{ id: "streamed-id", resolvedModel: "anthropic/primary-model" } as never],
+						progress: [{ id: "streamed-id", resolvedModel: "test/primary-model" } as never],
 					}),
 				);
 				onUpdate?.(
 					taskResult({
-						progress: [{ id: "streamed-id", resolvedModel: "openai/latest-streamed-model" } as never],
+						progress: [{ id: "streamed-id", resolvedModel: "test/latest-streamed-model" } as never],
 					}),
 				);
 				onUpdate?.(taskResult({ progress: [{ id: "streamed-id" } as never] }));
@@ -163,8 +163,8 @@ describe("/seance", () => {
 
 		await runSeanceCommand(ctx, `${resolved.path}`);
 
-		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("openai/latest-streamed-model"));
-		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("anthropic/primary-model"));
+		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("test/latest-streamed-model"));
+		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("test/primary-model"));
 	});
 
 	it("prefers the settled fallback model over the streamed primary model", async () => {
@@ -184,7 +184,7 @@ describe("/seance", () => {
 			) => {
 				onUpdate?.(
 					taskResult({
-						progress: [{ id: "fallback-id", resolvedModel: "anthropic/primary-model" } as never],
+						progress: [{ id: "fallback-id", resolvedModel: "test/primary-model" } as never],
 					}),
 				);
 				return taskResult({
@@ -192,7 +192,7 @@ describe("/seance", () => {
 						{
 							id: "fallback-id",
 							exitCode: 0,
-							resolvedModel: "openai/settled-fallback",
+							resolvedModel: "test/settled-fallback",
 							resolvedModelIsFallback: true,
 						} as never,
 					],
@@ -203,8 +203,8 @@ describe("/seance", () => {
 
 		await runSeanceCommand(ctx, `${resolved.path}`);
 
-		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("openai/settled-fallback"));
-		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("anthropic/primary-model"));
+		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("test/settled-fallback"));
+		expect(ctx.showStatus).not.toHaveBeenCalledWith(expect.stringContaining("test/primary-model"));
 	});
 
 	it("reports zero-exit aborted results as failures with their abort reason", async () => {

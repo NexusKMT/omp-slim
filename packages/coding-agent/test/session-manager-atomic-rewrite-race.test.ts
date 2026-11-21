@@ -158,7 +158,7 @@ describe("SessionManager atomic rewrite race", () => {
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		sessionManager.appendMessage({
 			role: "assistant",
@@ -273,7 +273,7 @@ describe("SessionManager atomic rewrite race", () => {
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		sessionManager.appendMessage({
 			role: "assistant",
@@ -595,7 +595,7 @@ describe("SessionManager atomic rewrite fence spans writer.close()", () => {
 		const storage = new CloseGatedRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		// Seed an assistant message so the session materializes on disk without
 		// opening a persistent writer (cold-path #rewriteSynchronously).
@@ -688,7 +688,7 @@ describe("SessionManager title-change fallback fenced-append durability", () => 
 		const storage = new TitleFallbackPausingStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		// Materialize the session on disk with a title slot present so a later
 		// setSessionName takes the append-then-updateSessionTitle try branch
@@ -759,7 +759,7 @@ describe("SessionManager fence relaxes when flushSync supersedes the atomic rewr
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		// Materialize a session on disk so subsequent rewrites are meaningful.
 		sessionManager.appendMessage({
@@ -905,7 +905,7 @@ describe("SessionManager fence handoff across superseded rewrites", () => {
 		storage.pauseCount = 2;
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model");
+		if (!model) throw new Error("Expected built-in test model");
 
 		sessionManager.appendMessage({
 			role: "assistant",
@@ -1097,9 +1097,9 @@ describe("SessionManager atomic entry batches", () => {
 		const usageId = manager.appendModelUsage(
 			{
 				purpose: "task-completion-probe",
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-sonnet-4-5",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				usage: {
 					input: 1,
 					output: 1,

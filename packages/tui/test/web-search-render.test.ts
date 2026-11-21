@@ -23,7 +23,7 @@ function buildResult(answer: string): {
 	details: SearchRenderDetails;
 } {
 	const response: SearchResponse = {
-		provider: "perplexity",
+		provider: "test",
 		answer,
 		sources: [
 			{ title: "Src One", url: "https://example.com/a", snippet: "snip a" },

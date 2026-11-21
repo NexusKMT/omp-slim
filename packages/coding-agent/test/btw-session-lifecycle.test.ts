@@ -23,9 +23,9 @@ function answer(text: string) {
 	const assistantMessage: AssistantMessage = {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		timestamp: Date.now(),
 		usage: {
@@ -66,20 +66,20 @@ describe("BTW session boundaries", () => {
 		await Settings.init({ inMemory: true, cwd: directory.path() });
 		auth = await AuthStorage.create(path.join(directory.path(), "auth.db"));
 		auth.keys.setRuntime("test", "test-key");
-		// The slim catalog ships no bundled models; resolve the anthropic model
+		// The slim catalog ships no bundled models; resolve the test model
 		// against a synthetic openai-completions provider instead.
 		const modelsPath = path.join(directory.path(), "models.yml");
 		await Bun.write(
 			modelsPath,
 			JSON.stringify({
 				providers: {
-					anthropic: {
+					test: {
 						baseUrl: "https://example.invalid/v1",
 						api: "openai-completions",
 						models: [
 							{
-								id: "claude-sonnet-4-5",
-								name: "claude-sonnet-4-5",
+								id: "test-model",
+								name: "test-model",
 								reasoning: false,
 								input: ["text"],
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -92,7 +92,7 @@ describe("BTW session boundaries", () => {
 			}),
 		);
 		const registry = new ModelRegistry(auth, modelsPath);
-		const model = registry.find("anthropic", "claude-sonnet-4-5");
+		const model = registry.find("test", "test-model");
 		if (!model) throw new Error("Expected bundled model");
 		manager = SessionManager.create(directory.path(), directory.path());
 		manager.appendMessage({ role: "user", content: "Source session", timestamp: Date.now() });

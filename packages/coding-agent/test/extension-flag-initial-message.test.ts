@@ -56,15 +56,15 @@ describe("extension flags vs initial message", () => {
 		expect(parsed.messages).toEqual(["hello"]);
 	});
 	it("keeps standalone -- as end-of-options after a string extension flag", () => {
-		const parsed = parseArgs(["--spawn-peer", "--", "--model", "opus", "hello"], extFlags);
+		const parsed = parseArgs(["--spawn-peer", "--", "--model", "test-model-2", "hello"], extFlags);
 		expect(parsed.unknownFlags.has("spawn-peer")).toBe(false);
 		expect(parsed.model).toBeUndefined();
-		expect(parsed.messages).toEqual(["--model", "opus", "hello"]);
+		expect(parsed.messages).toEqual(["--model", "test-model-2", "hello"]);
 	});
 	it("consumes literal -- string values only in equals form", () => {
-		const parsed = parseArgs(["--spawn-peer=--", "--model", "opus", "hello"], extFlags);
+		const parsed = parseArgs(["--spawn-peer=--", "--model", "test-model-2", "hello"], extFlags);
 		expect(parsed.unknownFlags.get("spawn-peer")).toBe("--");
-		expect(parsed.model).toBe("opus");
+		expect(parsed.model).toBe("test-model-2");
 		expect(parsed.messages).toEqual(["hello"]);
 	});
 	it("treats an @-prefixed string value as the flag's value, not a file arg (P1#1)", () => {
@@ -167,15 +167,15 @@ describe("extension flags vs initial message", () => {
 		// Reproduces the --option=value + extension flag combo: parseArgs splices
 		// the `=` value into its argv to reuse the `args[++i]` path. If it mutated
 		// the caller's array, the second (extension-aware) parse would re-splice
-		// and `sonnet` would leak into the prompt before "review the diff".
-		const argv = ["--model=sonnet", "--spawn-peer", "reviewer", "review the diff"];
+		// and `test-model` would leak into the prompt before "review the diff".
+		const argv = ["--model=test-model", "--spawn-peer", "reviewer", "review the diff"];
 		const snapshot = [...argv];
 		// First pass: startup parse, before extensions load.
 		parseArgs(argv);
 		expect(argv).toEqual(snapshot);
 		// Second pass: extension-aware reparse on the same array.
 		const reparsed = parseArgs(argv, extFlags);
-		expect(reparsed.model).toBe("sonnet");
+		expect(reparsed.model).toBe("test-model");
 		expect(reparsed.unknownFlags.get("spawn-peer")).toBe("reviewer");
 		expect(reparsed.messages).toEqual(["review the diff"]);
 		expect(argv).toEqual(snapshot);
@@ -239,8 +239,8 @@ describe("applyExtensionFlags (single-parser flag resolution)", () => {
 		// it so the value reaches unknownFlags and the trailing message is preserved,
 		// without consulting any list of built-in names.
 		const runner = fakeRunner({ model: "string" });
-		const args = applyExtensionFlags(runner, ["--model", "haiku", "do the task"]);
-		expect(runner.values.get("model")).toBe("haiku");
+		const args = applyExtensionFlags(runner, ["--model", "test-model", "do the task"]);
+		expect(runner.values.get("model")).toBe("test-model");
 		expect(args?.messages).toEqual(["do the task"]);
 		expect(args?.model).toBeUndefined();
 	});

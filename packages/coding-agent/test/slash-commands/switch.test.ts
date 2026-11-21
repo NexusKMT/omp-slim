@@ -4,9 +4,9 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 
 const MODELS = [
-	{ provider: "anthropic", id: "claude-opus-4-5", name: "claude-opus-4-5", contextWindow: 200_000 },
-	{ provider: "anthropic", id: "claude-sonnet-4-5", name: "claude-sonnet-4-5", contextWindow: 200_000 },
-	{ provider: "openai", id: "gpt-5.2", name: "gpt-5.2", contextWindow: 400_000 },
+	{ provider: "test", id: "test-model", name: "test-model", contextWindow: 200_000 },
+	{ provider: "test", id: "test-model-lite", name: "test-model-lite", contextWindow: 200_000 },
+	{ provider: "test", id: "test-model-2", name: "test-model-2", contextWindow: 400_000 },
 ];
 
 function createRuntime() {
@@ -62,10 +62,10 @@ describe("/switch slash command", () => {
 		expect(harness.setText).toHaveBeenCalledWith("");
 	});
 
-	it("/switch sonnet:high fuzzy-resolves and switches session-only with the thinking suffix", async () => {
+	it("/switch lite:high fuzzy-resolves and switches session-only with the thinking suffix", async () => {
 		const harness = createRuntime();
 
-		const handled = await executeBuiltinSlashCommand("/switch sonnet:high", harness.runtime);
+		const handled = await executeBuiltinSlashCommand("/switch lite:high", harness.runtime);
 
 		expect(handled).toBe(true);
 		expect(harness.switchSessionModel).toHaveBeenCalledWith(MODELS[1], "high");

@@ -35,8 +35,8 @@ describe("post-compaction transcript reuse", () => {
 			{
 				role: "assistant",
 				content: [{ type: "text", text: "## Large settled assistant turn\n\n```ts\nconst retained = true;\n```" }],
-				api: "anthropic-messages",
-				provider: "anthropic",
+				api: "openai-completions",
+				provider: "test",
 				model: "test",
 				usage: {
 					input: 1,

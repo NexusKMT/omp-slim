@@ -26,9 +26,9 @@ function assistant(fields: Partial<AssistantMessage>): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: zeroUsage,
 		stopReason: "stop",
 		timestamp: Date.now(),

@@ -1,7 +1,7 @@
 /**
  * Regression: print-mode must not write SILENT_ABORT_MARKER to stderr.
  *
- * Codex review flagged that `print-mode.ts` renders `errorMessage` verbatim
+ * Review flagged that `print-mode.ts` renders `errorMessage` verbatim
  * when stopReason is "aborted", which would surface the sentinel to stderr
  * (and exit with code 1). This test verifies the guard skips silent-abort.
  */
@@ -17,9 +17,9 @@ function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): Assist
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "draft" }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage: {
 			input: 0,

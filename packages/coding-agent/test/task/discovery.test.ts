@@ -31,12 +31,12 @@ const OMP_PLUGIN_AGENT_MD = [
 const CLAUDE_AGENT_MD = [
 	"---",
 	"name: cc-test-agent",
-	"description: Test Claude Code agent.",
+	"description: Test provider agent.",
 	"tools: Read, Grep, Glob, Bash",
-	"model: sonnet",
+	"model: test-model",
 	"color: purple",
 	"---",
-	"You are a Claude Code custom subagent.",
+	"You are a provider custom subagent.",
 ].join("\n");
 
 async function writeOmpPluginAgent(home: string): Promise<void> {
@@ -77,7 +77,7 @@ describe("discoverAgents", () => {
 		await removeWithRetries(tempHome);
 	});
 
-	test("loads OMP agents but skips Claude Code custom agents", async () => {
+	test("loads OMP agents but skips provider custom agents", async () => {
 		await fs.mkdir(path.join(projectDir, ".omp", "agents"), { recursive: true });
 		await fs.writeFile(path.join(projectDir, ".omp", "agents", "omp-test-agent.md"), OMP_AGENT_MD);
 

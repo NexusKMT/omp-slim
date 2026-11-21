@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { expandPrettyDataLines } from "@oh-my-pi/pi-tui/apps/debug/raw-sse";
 
 // Wide enough that `truncateToWidth` would clip the payload in the viewer; matches
-// what real Codex `response.output_item.done` frames look like on the wire.
+// what real `response.output_item.done` frames look like on the wire.
 function wideObjectLine(): string {
 	const payload = {
 		type: "response.output_item.done",

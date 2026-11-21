@@ -15,8 +15,8 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 describe("SessionManager branch ordering", () => {
 	it("getBranch() returns entries root→leaf with the newest entry last", () => {
 		const manager = SessionManager.inMemory();
-		const firstId = manager.appendModelChange("anthropic/claude-sonnet-4-5", "default");
-		const secondId = manager.appendModelChange("anthropic/claude-sonnet-4-6", "slow");
+		const firstId = manager.appendModelChange("test/test-model", "default");
+		const secondId = manager.appendModelChange("test/test-model-2", "slow");
 
 		const branch = manager.getBranch();
 		const ids = branch.map(entry => entry.id);
@@ -78,8 +78,8 @@ describe("SessionManager branch ordering", () => {
 
 	it("getLastModelChangeRole() returns the newest model_change role on the branch", () => {
 		const manager = SessionManager.inMemory();
-		manager.appendModelChange("anthropic/claude-sonnet-4-5", "default");
-		manager.appendModelChange("anthropic/claude-sonnet-4-6", "slow");
+		manager.appendModelChange("test/test-model", "default");
+		manager.appendModelChange("test/test-model-2", "slow");
 
 		// Newest role wins. A leaf→root branch makes the backwards scan hit the
 		// OLDEST entry first and return "default" here.
@@ -88,7 +88,7 @@ describe("SessionManager branch ordering", () => {
 		// Third change with a role distinct from BOTH earlier ones, so the
 		// assertion stays asymmetric: on a reversed branch the scan would find
 		// "default" (the old root), never "smol".
-		manager.appendModelChange("anthropic/claude-haiku-4-5", "smol");
+		manager.appendModelChange("test/test-model-3", "smol");
 		expect(manager.getLastModelChangeRole()).toBe("smol");
 	});
 

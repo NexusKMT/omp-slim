@@ -54,9 +54,9 @@ describe("SessionManager signature persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "done" }],
-			api: "openai-codex-responses",
+			api: "openai-completions",
 			provider: "openai-codex",
-			model: "gpt-5.4",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -115,9 +115,9 @@ describe("SessionManager signature persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "toolCall", id: "tool_image", name: "eval", arguments: {} }],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
-			model: "claude-sonnet",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -188,9 +188,9 @@ describe("SessionManager signature persistence", () => {
 				{ type: "thinking", thinking: "reasoning", thinkingSignature: JSON.stringify(providerPayload.items[0]) },
 				{ type: "text", text: "done" },
 			],
-			api: "openai-responses",
+			api: "openai-completions",
 			provider: "github-copilot",
-			model: "gpt-5-mini",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -240,9 +240,9 @@ describe("SessionManager signature persistence", () => {
 				{ type: "thinking", thinking: "reasoning", thinkingSignature: JSON.stringify(reasoning) },
 				{ type: "text", text: "done" },
 			],
-			api: "openai-codex-responses",
+			api: "openai-completions",
 			provider: "openai-codex",
-			model: "gpt-5.2-codex",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -298,9 +298,9 @@ describe("SessionManager signature persistence", () => {
 					},
 				} as never,
 			],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
-			model: "claude-opus",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -366,9 +366,9 @@ describe("SessionManager signature persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: serverToolContent,
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
-			model: "claude-opus",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -402,7 +402,7 @@ describe("SessionManager signature persistence", () => {
 				content: "## Goal\nAudit the handlers.",
 				encryptedContent: encrypted,
 				filesText: "<files>\n# /repo/\nhandlers.ts (Read)\n</files>",
-				model: "claude-fable-5",
+				model: "test-model",
 				usedTokens: 81_066,
 			},
 		};
@@ -412,9 +412,9 @@ describe("SessionManager signature persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "ack" }],
-			api: "anthropic-messages",
+			api: "openai-completions",
 			provider: "anthropic",
-			model: "claude-fable-5",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -454,7 +454,7 @@ describe("SessionManager signature persistence", () => {
 		});
 		const providerPayload: CursorHistoryPayload = {
 			type: "cursorHistory",
-			wireRoute: '["kimi-k3","kimi-k3",false,false,[]]',
+			wireRoute: '["test-model","test-model",false,false,[]]',
 			digest: "digest",
 			records: [record],
 		};
@@ -462,9 +462,9 @@ describe("SessionManager signature persistence", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "toolCall", id: "call-read", name: "read", arguments: { path: "/tmp/big.txt" } }],
-			api: "cursor-agent",
+			api: "openai-completions",
 			provider: "cursor",
-			model: "kimi-k3",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -524,9 +524,9 @@ describe("SessionManager signature persistence", () => {
 				{ type: "thinking", thinking: thought, thinkingSignature: "sig" },
 				{ type: "text", text: "done" },
 			],
-			api: "google-generative-ai",
+			api: "openai-completions",
 			provider: "factory-droid",
-			model: "gemini-4-argon",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,

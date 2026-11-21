@@ -22,9 +22,9 @@ function makeStreamingMessage(content: AssistantMessage["content"]): AssistantMe
 	return {
 		role: "assistant",
 		content,
-		api: "openai-responses",
-		provider: "xai-oauth",
-		model: "grok-4.6",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "toolUse",
 		usage: {
 			input: 0,

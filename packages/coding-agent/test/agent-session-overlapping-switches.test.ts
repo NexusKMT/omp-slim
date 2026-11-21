@@ -51,7 +51,7 @@ describe("overlapping session switches", () => {
 	function createSession(): AgentSession {
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			handler: () => ({ content: ["noted"] }),
 		});
 		const agent = new Agent({

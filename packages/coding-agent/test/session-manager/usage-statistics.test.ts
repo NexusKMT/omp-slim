@@ -8,9 +8,9 @@ describe("SessionManager usage statistics", () => {
 	const modelUsage = {
 		purpose: "auto-thinking",
 		role: "smol",
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-haiku-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage: {
 			input: 11,
@@ -209,8 +209,8 @@ describe("SessionManager usage statistics", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
 			api: "openai-completions",
-			provider: "github-copilot",
-			model: "gpt-4o",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 10,
 				output: 5,
@@ -262,9 +262,9 @@ describe("SessionManager usage statistics", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model-2",
 			usage: usage(0.38),
 			stopReason: "stop",
 			timestamp: 1,
@@ -291,9 +291,9 @@ describe("SessionManager usage statistics", () => {
 		session.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			model: "gpt-5.5",
+			api: "openai-completions",
+			provider: "test-alt",
+			model: "test-model-4",
 			usage: {
 				input: 0,
 				output: 29,
@@ -321,10 +321,10 @@ describe("SessionManager usage statistics", () => {
 		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		session.appendMessage({
 			role: "assistant",
-			content: [{ type: "text", text: "haiku" }],
-			api: "anthropic-messages",
-			provider: "github-copilot",
-			model: "claude-haiku-4.5",
+			content: [{ type: "text", text: "test" }],
+			api: "openai-completions",
+			provider: "test-alt2",
+			model: "test-model",
 			usage: {
 				input: 10,
 				output: 5,
@@ -368,8 +368,8 @@ describe("SessionManager usage statistics", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "hi" }],
 			api: "openai-completions",
-			provider: "openai",
-			model: "gpt-4o",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 10,
 				output: 5,
@@ -401,9 +401,9 @@ describe("SessionManager usage statistics", () => {
 			session.appendMessage({
 				role: "assistant",
 				content: [{ type: "text", text: "hi" }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-sonnet-4",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model-3",
 				usage: {
 					input: 1,
 					output: 2,

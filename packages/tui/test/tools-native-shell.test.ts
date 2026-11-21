@@ -405,9 +405,9 @@ describe("read image results", () => {
 				name: "read",
 				arguments: { path },
 			})),
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "toolUse",
 			usage: {
 				input: 0,

@@ -69,8 +69,8 @@ describe("InteractiveMode shutdown when the session store keeps failing (#12238)
 		sessionManager.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
 		sessionManager.appendMessage({
 			role: "assistant",
-			provider: "anthropic",
-			model: "claude-3-7-sonnet",
+			provider: "test",
+			model: "test-model",
 			content: [{ type: "text", text: "yo" }],
 			stopReason: "stop",
 			usage: {
@@ -81,7 +81,7 @@ describe("InteractiveMode shutdown when the session store keeps failing (#12238)
 				totalTokens: 2,
 				cost: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			},
-			api: "anthropic-messages",
+			api: "openai-completions",
 			timestamp: Date.now(),
 		});
 		await sessionManager.ensureOnDisk();

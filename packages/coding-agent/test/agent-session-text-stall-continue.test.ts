@@ -40,14 +40,14 @@ describe("AgentSession text-only stream stall", () => {
 
 	it("continues after committed text instead of stopping on the stall", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
+		if (!model) throw new Error("Expected bundled test model to exist");
 
 		const mock = createMockModel({
 			responses: [
 				{
 					content: ["Here is the first half of the answ"],
 					stopReason: "error",
-					errorMessage: "Anthropic stream stalled while waiting for the next event",
+					errorMessage: "Provider stream stalled while waiting for the next event",
 				},
 				{ content: ["er, and the second half."], stopReason: "stop" },
 			],

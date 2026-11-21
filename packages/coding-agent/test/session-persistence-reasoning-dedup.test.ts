@@ -30,9 +30,9 @@ function assistantEntry(
 		message: {
 			role: "assistant",
 			content,
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			model: "gpt-5.2-codex",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: usage(),
 			stopReason: "stop",
 			...(providerPayload ? { providerPayload } : {}),
@@ -66,7 +66,7 @@ describe("session reasoning-signature dedup", () => {
 					{ type: "thinking", thinking: "covered", thinkingSignature: JSON.stringify(covered) },
 					{ type: "thinking", thinking: "orphan", thinkingSignature: orphanSignature },
 				],
-				{ type: "openaiResponsesHistory", provider: "openai-codex", items: [covered] },
+				{ type: "openaiResponsesHistory", provider: "test", items: [covered] },
 			),
 			blobStore,
 		);

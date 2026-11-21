@@ -76,7 +76,7 @@ test("agent progress events keep scalar fields and cut long text", async () => {
 		task: assignment,
 		toolCount: 26,
 		cost: 0.0177,
-		resolvedModelIdentity: "anthropic/claude-haiku-5-5",
+		resolvedModelIdentity: "test/test-model",
 		extractedToolData: { yield: [{ data: "y".repeat(50_000) }] },
 		recentTools: [{ tool: "read", args: "z".repeat(5_000) }],
 		recentOutput: ["line"],
@@ -109,7 +109,7 @@ test("agent progress events keep scalar fields and cut long text", async () => {
 			status: "completed",
 			toolCount: 26,
 			cost: 0.0177,
-			resolvedModelIdentity: "anthropic/claude-haiku-5-5",
+			resolvedModelIdentity: "test/test-model",
 			taskPreview: "Review the parser",
 		});
 		expect(event).not.toHaveProperty("extractedToolData");

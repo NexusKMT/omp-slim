@@ -8,10 +8,10 @@ describe("isProviderRetryableError", () => {
 	});
 	it("retries gateway stream drops before message_delta", () => {
 		expect(
-			isProviderRetryableError(new Error("Claude upstream stream ended before message_delta, reason=scanner_error")),
+			isProviderRetryableError(new Error("Upstream stream ended before message_delta, reason=scanner_error")),
 		).toBe(true);
 		expect(
-			isProviderRetryableError(new Error("Claude upstream stream ended before message_start, reason=scanner_error")),
+			isProviderRetryableError(new Error("Upstream stream ended before message_start, reason=scanner_error")),
 		).toBe(true);
 	});
 	it("retries HTTP/2 stream errors (INTERNAL_ERROR)", () => {
@@ -31,7 +31,7 @@ describe("isProviderRetryableError", () => {
 	});
 
 	it("retries first-event timeout errors", () => {
-		expect(isProviderRetryableError(new Error("Anthropic stream timed out while waiting for the first event"))).toBe(
+		expect(isProviderRetryableError(new Error("Provider stream timed out while waiting for the first event"))).toBe(
 			true,
 		);
 	});
@@ -66,8 +66,8 @@ describe("isProviderRetryableError", () => {
 			),
 		).toBe(false);
 		expect(isProviderRetryableError(new Error("usage_limit_reached"))).toBe(false);
-		expect(isProviderRetryableError(new Error("You have hit your ChatGPT usage limit"))).toBe(false);
-		// Anthropic monthly spend-cap 429 (issue #4787): must not retry, or the
+		expect(isProviderRetryableError(new Error("You have hit your usage limit"))).toBe(false);
+		// Provider monthly spend-cap 429 (issue #4787): must not retry, or the
 		// provider loop burns its budget on minutes-long retry-after backoff and
 		// surfaces "Deadline exceeded" instead of the quota error.
 		expect(

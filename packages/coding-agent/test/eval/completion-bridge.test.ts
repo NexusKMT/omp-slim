@@ -60,7 +60,7 @@ function makeModel(provider: string, id: string, extra: Partial<Model<Api>> = {}
 	return {
 		id,
 		name: id,
-		api: "openai-responses",
+		api: "openai-completions",
 		provider,
 		baseUrl: "https://example.test/v1",
 		reasoning: false,
@@ -120,7 +120,7 @@ function assistant(opts: {
 	return {
 		role: "assistant",
 		content,
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "default",
 		usage: {
@@ -163,7 +163,7 @@ import { Settings } from ${JSON.stringify(settingsPath)};
 const SMOL = {
 	id: "smol",
 	name: "smol",
-	api: "openai-responses",
+	api: "openai-completions",
 	provider: "p",
 	baseUrl: "https://example.test/v1",
 	reasoning: false,
@@ -186,7 +186,7 @@ const session = {
 vi.spyOn(ai, "completeSimple")
 	.mockResolvedValueOnce({
 		role: "assistant",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		stopReason: "stop",
@@ -194,7 +194,7 @@ vi.spyOn(ai, "completeSimple")
 	})
 	.mockResolvedValueOnce({
 		role: "assistant",
-		api: "openai-responses",
+		api: "openai-completions",
 		provider: "p",
 		model: "smol",
 		stopReason: "stop",
@@ -264,8 +264,8 @@ describe("runEvalCompletion", () => {
 		expect(result.details).toEqual({ model: "p/smol", structured: false });
 	});
 
-	it("supplies a non-empty systemPrompt when system is omitted (codex 'Instructions are required' guard)", async () => {
-		// The openai-codex Responses transformer drops `instructions` when no
+	it("supplies a non-empty systemPrompt when system is omitted (provider 'Instructions are required' guard)", async () => {
+		// The provider Responses transformer drops `instructions` when no
 		// system prompt is provided, and the remote endpoint then 400s with
 		// "Instructions are required". runEvalCompletion must always carry a non-empty
 		// systemPrompt so `completion("…")` without a `system` argument works.

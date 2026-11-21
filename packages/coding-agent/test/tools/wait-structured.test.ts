@@ -97,10 +97,10 @@ describe("wait structured output rendering", () => {
 
 	test("a run that failed before yielding reports the provider error, not a schema verdict", async () => {
 		// Production 2026-09-21: the delivery read `Structured output: schema
-		// invalid: Anthropic stream envelope error: ...` with the half-streamed
+		// invalid: Provider stream envelope error: ...` with the half-streamed
 		// prose as a JSON preview. No payload existed to judge.
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
-		const error = "Anthropic stream envelope error: stream ended before message_stop";
+		const error = "Provider stream envelope error: stream ended before message_stop";
 		const jobId = registerSettledJob(
 			manager,
 			"DeadStream",

@@ -87,10 +87,10 @@ describe("discovery provider toggles with subagents and helper sessions", () => 
 			agentId: "0-Sub",
 		});
 
-		cfgDisabledProviders.set(parentSettings, ["claude"]);
-		expect(isProviderEnabled("claude")).toBe(false);
+		cfgDisabledProviders.set(parentSettings, ["test"]);
+		expect(isProviderEnabled("test")).toBe(false);
 		cfgDisabledProviders.set(parentSettings, []);
-		expect(isProviderEnabled("claude")).toBe(true);
+		expect(isProviderEnabled("test")).toBe(true);
 		close();
 	});
 
@@ -102,16 +102,16 @@ describe("discovery provider toggles with subagents and helper sessions", () => 
 		try {
 			// A security scan runs its own session on a clone of the host settings.
 			const helper = await start(await host.cloneForCwd(tempDir.path()), { bindProcessState: false });
-			cfgDisabledProviders.set(host, ["claude"]);
-			expect(isProviderEnabled("claude")).toBe(false);
+			cfgDisabledProviders.set(host, ["test"]);
+			expect(isProviderEnabled("test")).toBe(false);
 			await helper.dispose();
 
 			const topLevel = await start(Settings.isolated({ "compaction.enabled": false }));
-			expect(isProviderEnabled("claude")).toBe(true);
+			expect(isProviderEnabled("test")).toBe(true);
 			await topLevel.dispose();
 
 			cfgDisabledProviders.set(host, ["cursor"]);
-			expect(isProviderEnabled("claude")).toBe(true);
+			expect(isProviderEnabled("test")).toBe(true);
 			expect(isProviderEnabled("cursor")).toBe(false);
 		} finally {
 			releaseHost();

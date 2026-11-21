@@ -576,7 +576,7 @@ describe("task.batch spawning", () => {
 			description: "Read-only scout",
 			systemPrompt: "Investigate the assigned target.",
 			tools: ["read"],
-			model: ["anthropic/claude-haiku-4-5:low"],
+			model: ["test/test-model:low"],
 			output: scoutSchema,
 		};
 		const reviewerAgent: AgentDefinition = {
@@ -585,7 +585,7 @@ describe("task.batch spawning", () => {
 			description: "Code review specialist",
 			systemPrompt: "Review the assigned target.",
 			tools: ["read", "bash"],
-			model: ["anthropic/claude-sonnet-4-6:medium"],
+			model: ["test/test-model-2:medium"],
 			output: reviewerSchema,
 		};
 		mockDiscovery([scoutAgent, reviewerAgent]);
@@ -677,7 +677,7 @@ describe("task.batch spawning", () => {
 		// flat shape directly; the wire schema is batch-only but runtime is not.
 		mockDiscovery({
 			...taskAgent,
-			model: ["anthropic/claude-sonnet-4"],
+			model: ["test/test-model"],
 			output: { type: "object", properties: { agent: { type: "string" } } },
 		});
 		let captured:
@@ -708,7 +708,7 @@ describe("task.batch spawning", () => {
 					"async.enabled": true,
 					"task.batch": true,
 					"task.structured": true,
-					"task.agentModelOverrides": { task: "openai/gpt-4.1-mini" },
+					"task.agentModelOverrides": { task: "test/test-model" },
 				},
 			}),
 		);

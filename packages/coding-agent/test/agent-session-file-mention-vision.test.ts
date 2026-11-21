@@ -38,7 +38,7 @@ it("describes an @-mentioned image for a text-only model", async () => {
 	cleanups.push(() => authStorage.close());
 	authStorage.keys.setRuntime("test", "test-key");
 	const bundled = createTestModel({ provider: "test", id: "test-model" });
-	if (!bundled) throw new Error("Expected claude-sonnet-4-5 model to exist");
+	if (!bundled) throw new Error("Expected test-model model to exist");
 	const textOnly: Model = { ...bundled, input: ["text"] };
 	const mock = createMockModel({ responses: [{ content: ["ok"] }] });
 	const session = new AgentSession({

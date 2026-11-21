@@ -24,7 +24,7 @@ function createModel(): Model<"openai-completions"> {
 		id: "mock",
 		name: "mock",
 		api: "openai-completions",
-		provider: "openai",
+		provider: "test",
 		baseUrl: "https://example.invalid",
 		reasoning: false,
 		input: ["text"],

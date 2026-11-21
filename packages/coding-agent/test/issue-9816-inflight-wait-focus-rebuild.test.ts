@@ -38,9 +38,9 @@ const usage = {
 const danglingWait = {
 	role: "assistant",
 	content: [{ type: "toolCall", id: "wait-1", name: "wait", arguments: {} }],
-	api: "anthropic-messages",
-	provider: "anthropic",
-	model: "claude-sonnet-4-5",
+	api: "openai-completions",
+	provider: "test",
+	model: "test-model",
 	stopReason: "toolUse",
 	usage,
 	timestamp: Date.now(),
@@ -79,9 +79,9 @@ const danglingTask = {
 			},
 		},
 	],
-	api: "anthropic-messages",
-	provider: "anthropic",
-	model: "claude-sonnet-4-5",
+	api: "openai-completions",
+	provider: "test",
+	model: "test-model",
 	stopReason: "toolUse",
 	usage,
 	timestamp: Date.now(),
@@ -146,9 +146,9 @@ const backgroundTaskCall = {
 			arguments: { tasks: [{ name: "Bg", agent: "task", task: "background work" }] },
 		},
 	],
-	api: "anthropic-messages",
-	provider: "anthropic",
-	model: "claude-sonnet-4-5",
+	api: "openai-completions",
+	provider: "test",
+	model: "test-model",
 	stopReason: "toolUse",
 	usage,
 	timestamp: Date.now(),
@@ -422,7 +422,7 @@ describe("#10447 persisted background task board across a focus rebuild", () => 
 	});
 });
 
-describe("live Cursor focus recovery without another delta", () => {
+describe("live focus recovery without another delta", () => {
 	const paused: AssistantMessage = {
 		role: "assistant",
 		content: [
@@ -430,9 +430,9 @@ describe("live Cursor focus recovery without another delta", () => {
 			{ type: "toolCall", id: "paused-grep", name: "grep", arguments: { pattern: "sample" } },
 			{ type: "text", text: "LAST_VISIBLE_TEXT" },
 		],
-		api: "cursor-agent",
-		provider: "cursor",
-		model: "cursor-grok-4.6",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage,
 		timestamp: 1,

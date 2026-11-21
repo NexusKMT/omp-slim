@@ -40,9 +40,9 @@ function abortedAssistant(content: AssistantMessage["content"]): AssistantMessag
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: interruptedUsage,
 		stopReason: "aborted",
 		timestamp: 1,
@@ -149,9 +149,9 @@ function settledAssistant(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 100,
 			output: 20,

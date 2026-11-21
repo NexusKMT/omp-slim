@@ -223,9 +223,9 @@ describe("createSessionManager — missing session (#2084)", () => {
 					message: {
 						role: "assistant",
 						content: [{ type: "toolCall", id: "toolu_live", name: "bash", arguments: { command: "sleep 40" } }],
-						api: "anthropic-messages",
-						provider: "anthropic",
-						model: "claude",
+						api: "openai-completions",
+						provider: "test",
+						model: "test-model",
 						stopReason: "toolUse",
 						timestamp: Date.now(),
 						usage: {

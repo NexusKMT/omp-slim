@@ -22,9 +22,9 @@ function assistant(overrides: Partial<Extract<AgentMessage, { role: "assistant" 
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text: "hi" }],
-		api: "anthropic-messages" as const,
-		provider: "anthropic" as const,
-		model: "claude-sonnet-4-5",
+		api: "openai-completions" as const,
+		provider: "test" as const,
+		model: "test-model",
 		usage: {
 			input: 1,
 			output: 1,

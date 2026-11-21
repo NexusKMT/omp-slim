@@ -12,7 +12,7 @@ import { createTestModel } from "../helpers/test-model";
 // Real SDK session and RPC dispatch for the progress-event tests; the model always answers "pong".
 // A `session_before_compact` hook supplies the summary, so a manual compaction commits without a
 // summarizer call.
-const MODEL = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+const MODEL = createTestModel({ provider: "anthropic", id: "test-model" });
 if (!MODEL) throw new Error("bundled test model missing");
 
 const cwd = process.cwd();

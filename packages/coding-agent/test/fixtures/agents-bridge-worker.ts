@@ -85,7 +85,7 @@ let gate = Promise.withResolvers<void>();
 let gateOpen = false;
 
 async function makeSession(id: string, gated: boolean): Promise<AgentSession> {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "anthropic", id: "test-model" });
 	if (!model) throw new Error("bundled model missing");
 	const mock = createMockModel({
 		handler: async () => {

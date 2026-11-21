@@ -45,7 +45,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 
 	function modelOrThrow(id: string): Model<Api> {
 		const model = createTestModel({ provider: "test", id: id });
-		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
+		if (!model) throw new Error(`Expected test model ${id} to exist`);
 		return model;
 	}
 
@@ -73,8 +73,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 	}
 
 	it("switches the active model via the synchronous auth check, not the resolver", async () => {
-		const from = modelOrThrow("claude-sonnet-4-5");
-		const to = modelOrThrow("claude-sonnet-4-6");
+		const from = modelOrThrow("test-model");
+		const to = modelOrThrow("test-model-2");
 		const s = makeSession(from);
 
 		const getApiKeySpy = spyOn(registry, "getApiKey");
@@ -89,8 +89,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 	});
 
 	it("temporary switch also avoids the resolver", async () => {
-		const from = modelOrThrow("claude-sonnet-4-5");
-		const to = modelOrThrow("claude-sonnet-4-6");
+		const from = modelOrThrow("test-model");
+		const to = modelOrThrow("test-model-2");
 		const s = makeSession(from);
 
 		const getApiKeySpy = spyOn(registry, "getApiKey");
@@ -103,8 +103,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 	});
 
 	it("rejects the switch synchronously when no credential is configured, without calling the resolver", async () => {
-		const from = modelOrThrow("claude-sonnet-4-5");
-		const to = modelOrThrow("claude-sonnet-4-6");
+		const from = modelOrThrow("test-model");
+		const to = modelOrThrow("test-model-2");
 		const s = makeSession(from);
 
 		const getApiKeySpy = spyOn(registry, "getApiKey");

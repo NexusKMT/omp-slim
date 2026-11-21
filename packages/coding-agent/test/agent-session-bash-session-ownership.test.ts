@@ -55,7 +55,7 @@ describe("AgentSession bash session ownership", () => {
 		responseContent: () => string[] = () => ["Done"],
 	): AgentSession {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!model) throw new Error("Expected test-model model to exist");
 		const mock = createMockModel({ handler: () => ({ content: responseContent() }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -63,13 +63,13 @@ describe("AgentSession bash session ownership", () => {
 			streamFn: mock.stream,
 		});
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
-		modelRegistry.registerProvider("anthropic", {
+		modelRegistry.registerProvider("test", {
 			baseUrl: "https://example.invalid/v1",
 			api: "openai-completions",
 			models: [
 				{
-					id: "claude-sonnet-4-5",
-					name: "claude-sonnet-4-5",
+					id: "test-model",
+					name: "test-model",
 					reasoning: false,
 					input: ["text"],
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -240,7 +240,7 @@ describe("AgentSession bash session ownership", () => {
 				case "switch": {
 					const targetManager = SessionManager.create(tempDir.path(), sessionDir);
 					// The mock reply's model id is not registered; record one the switch can restore.
-					targetManager.appendModelChange("anthropic/claude-sonnet-4-5");
+					targetManager.appendModelChange("test/test-model");
 					targetManager.appendMessage({ role: "user", content: "target", timestamp: Date.now() });
 					targetManager.appendMessage(createAssistantMessage("target reply"));
 					await targetManager.ensureOnDisk();
@@ -288,7 +288,7 @@ describe("AgentSession bash session ownership", () => {
 	/** A persisted session the test can switch back to; the mock reply's model id is not registered. */
 	async function createSwitchableSession(extensionRunner?: ExtensionRunner): Promise<string> {
 		const manager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
-		manager.appendModelChange("anthropic/claude-sonnet-4-5");
+		manager.appendModelChange("test/test-model");
 		manager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 		manager.appendMessage(createAssistantMessage("seed reply"));
 		await manager.ensureOnDisk();

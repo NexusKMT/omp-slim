@@ -595,9 +595,9 @@ describe("InteractiveMode goal mode integration", () => {
 				content: toolTurn
 					? [{ type: "toolCall" as const, id: toolCallId, name: "todo", arguments: { op: "view" } }]
 					: [{ type: "text" as const, text: "Verification remains complete." }],
-				api: "anthropic-messages" as const,
-				provider: "anthropic" as const,
-				model: "claude-sonnet-4-5",
+				api: "openai-completions" as const,
+				provider: "test" as const,
+				model: "test-model",
 				usage: {
 					input: 1,
 					output: 1,

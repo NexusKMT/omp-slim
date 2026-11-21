@@ -40,9 +40,9 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		return {
 			role: "assistant",
 			content: [{ type: "text", text }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "stop",
 			usage: {
 				input: 100,
@@ -68,9 +68,9 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		const assistantMsg: AssistantMessage = {
 			role: "assistant",
 			content: [toolCall],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "toolUse",
 			usage: {
 				input: 50,
@@ -115,7 +115,7 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		sessionManager = SessionManager.inMemory(tempDir.path());
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,

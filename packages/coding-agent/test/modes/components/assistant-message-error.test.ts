@@ -18,9 +18,9 @@ function erroredMessage(errorMessage: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 0,
 			output: 0,
@@ -115,9 +115,9 @@ describe("AssistantMessageComponent hidden thinking rendering", () => {
 				{ type: "thinking", thinking: "private reasoning" },
 				{ type: "text", text: "Visible answer" },
 			],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,
@@ -152,9 +152,9 @@ describe("AssistantMessageComponent streaming thinking pulse", () => {
 		return {
 			role: "assistant",
 			content,
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output,

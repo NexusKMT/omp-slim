@@ -61,8 +61,8 @@ function assistantWithUsage(overrides: Partial<AssistantMessage> = {}): Assistan
 	return {
 		role: "assistant",
 		content: [],
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "test",
 		usage: usageWithInput(0),
 		stopReason: "stop",
@@ -165,20 +165,20 @@ describe("InteractiveMode plan review rendering", () => {
 		await Settings.init({ inMemory: true, cwd: sharedTempDir.path() });
 		authStorage = await AuthStorage.create(path.join(sharedTempDir.path(), "testauth.db"));
 		authStorage.keys.setRuntime("test", "test-key");
-		// The slim catalog ships no bundled models; resolve the anthropic model
+		// The slim catalog ships no bundled models; resolve the test model
 		// against a synthetic openai-completions provider instead.
 		const modelsPath = path.join(sharedTempDir.path(), "models.yml");
 		await Bun.write(
 			modelsPath,
 			JSON.stringify({
 				providers: {
-					anthropic: {
+					test: {
 						baseUrl: "https://example.invalid/v1",
 						api: "openai-completions",
 						models: [
 							{
-								id: "claude-sonnet-4-5",
-								name: "claude-sonnet-4-5",
+								id: "test-model",
+								name: "Test Model",
 								reasoning: false,
 								input: ["text"],
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -200,9 +200,9 @@ describe("InteractiveMode plan review rendering", () => {
 
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@pi-plan-review-");
-		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
+		const model = modelRegistry.find("test", "test-model");
 		if (!model) {
-			throw new Error("Expected claude-sonnet-4-5 to exist in registry");
+			throw new Error("Expected test-model to exist in registry");
 		}
 
 		session = new AgentSession({
@@ -1146,11 +1146,11 @@ describe("InteractiveMode plan review rendering", () => {
 
 		expect(mode.ui.hasOverlay()).toBe(true);
 
-		mode.showPinnedError("Codex rate limit reached");
+		mode.showPinnedError("provider rate limit reached");
 
 		expect(mode.ui.hasOverlay()).toBe(false);
 		expect(mode.ui.getFocused()).toBe(mode.editor);
-		expect(mode.errorBannerContainer.render(80).join("\n")).toContain("Codex rate limit reached");
+		expect(mode.errorBannerContainer.render(80).join("\n")).toContain("provider rate limit reached");
 		await expect(choice).resolves.toBeUndefined();
 	});
 
@@ -2309,8 +2309,8 @@ describe("AssistantMessageComponent aborted replay", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "Approved plan; transitioning to compaction." }],
 			api: "openai-completions",
-			provider: "github-copilot",
-			model: "gpt-4o",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,

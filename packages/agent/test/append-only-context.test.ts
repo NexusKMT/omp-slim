@@ -515,7 +515,7 @@ describe("message sync", () => {
 			id: "assistant-1",
 			providerPayload: {
 				type: "openaiResponsesHistory",
-				provider: "openai",
+				provider: "test",
 				items: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "old native" }] }],
 			},
 		} as any;
@@ -530,7 +530,7 @@ describe("message sync", () => {
 				id: "assistant-1",
 				providerPayload: {
 					type: "openaiResponsesHistory",
-					provider: "openai",
+					provider: "test",
 					items: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "new native" }] }],
 				},
 			},

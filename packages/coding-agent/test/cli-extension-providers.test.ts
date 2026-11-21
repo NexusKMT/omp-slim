@@ -4,7 +4,7 @@
  * One-shot CLIs (`omp bench`, dry-balance) build a bare `ModelRegistry` that
  * only knows built-in catalog providers. Before the helper existed they never
  * loaded extensions, so a provider contributed by an extension
- * (`pi.registerProvider(...)`, e.g. a custom OpenAI-compatible gateway under
+ * (`pi.registerProvider(...)`, e.g. a custom compatible gateway under
  * `~/.omp/agent/extensions/`) was invisible to model resolution and
  * `omp bench <provider>/<model>` failed with "Model not found".
  *

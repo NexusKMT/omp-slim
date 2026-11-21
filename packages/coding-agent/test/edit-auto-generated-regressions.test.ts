@@ -35,8 +35,8 @@ function createAssistantMessage(content: AssistantMessage["content"], stopReason
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: {
 			input: 0,

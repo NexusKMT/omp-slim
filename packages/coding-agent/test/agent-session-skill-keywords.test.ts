@@ -54,7 +54,7 @@ describe("AgentSession skill prompt keyword steering", () => {
 		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!model) throw new Error("Expected test-model model to exist");
 
 		const agent = new Agent({
 			getApiKey: () => "test-key",

@@ -96,7 +96,7 @@ describe("wrapFetchForExtraCa", () => {
 
 		const { fetchImpl, calls } = makeRecordingFetch();
 		const wrapped = wrapFetchForExtraCa(fetchImpl);
-		// Simulate the Anthropic Foundry path: caller already curated the CA
+		// Simulate the Foundry path: caller already curated the CA
 		// list with their own roots. Wrapper must append, not re-seed.
 		await wrapped("https://corp.example/v1", { tls: { ca: [SECONDARY_PEM] } } as RequestInit);
 

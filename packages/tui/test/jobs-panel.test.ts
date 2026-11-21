@@ -279,7 +279,7 @@ describe("JobsSheet", () => {
 		const lines = sheet.render(100).map(line => Bun.stripANSI(line));
 		const head = lines.findIndex(line => line.includes("eval · tests passed per model"));
 		expect(head).toBeGreaterThan(0);
-		expect(lines[head + 2]).toMatch(/^ {5}opus-4\.5 +█+░* +26\/30$/);
+		expect(lines[head + 2]).toMatch(/^ {5}test-model +█+░* +26\/30$/);
 		expect(lines.findIndex(line => line.includes("running 12 tests"))).toBeGreaterThan(head);
 	});
 

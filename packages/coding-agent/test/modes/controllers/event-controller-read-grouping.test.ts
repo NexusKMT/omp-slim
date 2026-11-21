@@ -1,7 +1,7 @@
 /**
  * Read-group accretion across assistant completions.
  *
- * Reasoning models (and codex-style providers) frequently emit one `read` per
+ * Reasoning models (and similar providers) frequently emit one `read` per
  * completion as `[thinking?, toolCall]` rather than batching parallel calls.
  * The transcript should still collapse an uninterrupted run of those reads into
  * a single {@link ReadToolGroupComponent}; a completion that renders visible
@@ -61,9 +61,9 @@ function assistantMessage(content: Block[]): AssistantMessage {
 	return {
 		role: "assistant",
 		content,
-		api: "openai-codex-responses",
-		provider: "openai-codex",
-		model: "gpt-5.5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "toolUse",
 		usage: {
 			input: 0,

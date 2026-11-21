@@ -65,8 +65,8 @@ it("keeps the compacted eval context in the fork's provider prefix", async () =>
 	manager.appendMessage({
 		role: "assistant",
 		content: [{ type: "toolCall", id: "eval-1", name: "eval", arguments: { code: "1+1" } }],
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: model.id,
 		stopReason: "toolUse",
 		usage: {

@@ -27,8 +27,8 @@ function createAssistantStopMessage(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: text ? [{ type: "text", text }] : [],
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: {
 			input: 0,
@@ -1090,13 +1090,13 @@ describe("runSubprocess yield reminders", () => {
 
 		const modelRegistry = {
 			refresh: async () => {},
-			getAvailable: () => [{ provider: "openai", id: "gpt-4o", name: "GPT-4o" }],
+			getAvailable: () => [{ provider: "test", id: "test-model", name: "Test Model" }],
 		} as unknown as import("@oh-my-pi/pi-coding-agent/config/model-registry").ModelRegistry;
 
 		await runSubprocess({
 			...baseOptions,
 			id: "subagent-thinking-fallback",
-			modelOverride: "openai/gpt-4o",
+			modelOverride: "test/test-model",
 			thinkingLevel: Effort.High,
 			modelRegistry,
 		});
@@ -1184,8 +1184,8 @@ describe("runSubprocess yield reminders", () => {
 		const result = await runSubprocess({ ...baseOptions, id: "subagent-provider-error" });
 
 		expect(result.exitCode).toBe(1);
-		expect(result.error).toBe("[openai/mock] Connect error invalid_argument: Error");
-		expect(result.stderr).toBe("[openai/mock] Connect error invalid_argument: Error");
+		expect(result.error).toBe("[test/mock] Connect error invalid_argument: Error");
+		expect(result.stderr).toBe("[test/mock] Connect error invalid_argument: Error");
 	});
 
 	it("surfaces the assistant abort message instead of 'Cancelled by caller' on an internal turn abort", async () => {

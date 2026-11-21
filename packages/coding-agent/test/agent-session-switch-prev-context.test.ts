@@ -29,10 +29,10 @@ describe("AgentSession.switchSession previous-context build", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
-		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
+		if (!bundled) throw new Error("Expected built-in test model to exist");
 		model = bundled;
 	});
 

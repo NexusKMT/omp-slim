@@ -87,7 +87,7 @@ describe("SessionInfoOverlay", () => {
 	it("renders session details, footer help, and fixed-width box rows", () => {
 		const overlay = new SessionInfoOverlay(
 			{ terminal: { rows: 12 } },
-			"File: /tmp/session.jsonl\nProvider: openai\nTokens: 42",
+			"File: /tmp/session.jsonl\nProvider: test\nTokens: 42",
 			() => {},
 		);
 

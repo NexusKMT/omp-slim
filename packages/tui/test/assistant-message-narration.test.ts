@@ -14,9 +14,9 @@ function turn(narration: boolean): AssistantMessage {
 			{ type: "thinking", thinking: NARRATION, thinkingSignature: "sig-narration", ...(narration && { narration }) },
 			{ type: "toolCall", id: "toolu_1", name: "wait", arguments: {} },
 		],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-opus-5-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 0,
 			output: 0,
@@ -40,7 +40,7 @@ beforeAll(async () => {
 });
 
 describe("narration returned as thinking", () => {
-	// Regression: Opus 5.5 returns between-tool replies as thinking blocks, so a
+	// Regression: a model returns between-tool replies as thinking blocks, so a
 	// reply to a mid-task question vanished into the folded reasoning.
 	it("renders narration as answer text while reasoning stays hidden", () => {
 		const output = rendered(turn(true));

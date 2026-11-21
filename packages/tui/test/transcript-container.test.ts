@@ -151,9 +151,9 @@ const finalAnswer: AssistantMessage = {
 		{ type: "thinking", thinking: "Reasoning first" },
 		{ type: "text", text: "## Implemented" },
 	],
-	api: "openai-codex-responses",
-	provider: "openai-codex",
-	model: "gpt-5.6-sol",
+	api: "openai-completions",
+	provider: "test",
+	model: "test-model",
 	stopReason: "stop",
 	usage: {
 		input: 0,

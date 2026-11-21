@@ -295,8 +295,8 @@ describe("commit inference cache", () => {
 	test("keys all request material and round-trips parsed response text", async () => {
 		const material = {
 			operation: "analysis",
-			model: "anthropic/claude",
-			apiMode: "anthropic-messages",
+			model: "test/test-model",
+			apiMode: "openai-completions",
 			toolName: "create_conventional_analysis",
 			systemPrompt: "system",
 			userPrompt: "user",

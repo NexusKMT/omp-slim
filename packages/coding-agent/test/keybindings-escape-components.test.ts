@@ -68,7 +68,7 @@ describe("component escape bindings", () => {
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled model anthropic/claude-sonnet-4-5");
+			throw new Error("Expected bundled model test/test-model");
 		}
 
 		const settings = Settings.isolated({

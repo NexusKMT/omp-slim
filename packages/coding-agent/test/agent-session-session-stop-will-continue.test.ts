@@ -43,7 +43,7 @@ describe("AgentSession session_stop willContinue", () => {
 	it("marks extension agent_end willContinue when session_stop schedules a hidden turn", async () => {
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected bundled OpenAI test model to exist");
+			throw new Error("Expected bundled test model to exist");
 		}
 
 		// First settle reaches session_stop; second is the terminal continuation turn.

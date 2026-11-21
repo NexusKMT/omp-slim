@@ -29,10 +29,10 @@ const arkInitializeResponse = type({
 
 const TEST_MODELS: Model[] = [
 	buildModel({
-		id: "claude-sonnet-4-20250514",
-		name: "Claude Sonnet",
+		id: "test-model",
+		name: "Test Model",
 		api: "openai-completions",
-		provider: "anthropic",
+		provider: "test",
 		baseUrl: "https://example.invalid",
 		reasoning: true,
 		input: ["text", "image"],

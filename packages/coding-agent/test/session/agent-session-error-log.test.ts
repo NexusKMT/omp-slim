@@ -13,7 +13,7 @@ function makeMessage(overrides: Partial<AssistantMessage>): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
-		api: "cursor",
+		api: "openai-completions",
 		provider: "cursor",
 		model: "composer-2.5",
 		usage: {} as AssistantMessage["usage"],

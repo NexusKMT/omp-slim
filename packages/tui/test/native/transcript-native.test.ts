@@ -58,9 +58,9 @@ function assistant(content: AssistantMessage["content"], usage = USAGE): Assista
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage,
 		timestamp: 1,

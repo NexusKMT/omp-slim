@@ -526,7 +526,7 @@ describe("Editor component", () => {
 							name: "model",
 							description: "Select a model",
 							getArgumentCompletions() {
-								return [{ label: "claude-opus", value: "claude-opus" }];
+								return [{ label: "test-model", value: "test-model" }];
 							},
 						},
 						{ name: "help", description: "Show help" },
@@ -550,7 +550,7 @@ describe("Editor component", () => {
 
 			editor.handleInput("	");
 
-			expect(editor.getText()).toBe("/model claude-opus");
+			expect(editor.getText()).toBe("/model test-model");
 			expect(editor.isShowingAutocomplete()).toBe(false);
 		});
 
@@ -563,7 +563,7 @@ describe("Editor component", () => {
 							name: "model",
 							description: "Select a model",
 							getArgumentCompletions() {
-								return [{ label: "claude-opus", value: "claude-opus" }];
+								return [{ label: "test-model", value: "test-model" }];
 							},
 						},
 						{ name: "help", description: "Show help" },

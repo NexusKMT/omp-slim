@@ -422,8 +422,8 @@ describe("cleanse orchestration", () => {
 	});
 
 	test("routes cleanse as a top-level command", () => {
-		expect(resolveCliArgv(["cleanse", "-n", "4", "-m", "opus"])).toEqual({
-			argv: ["cleanse", "-n", "4", "-m", "opus"],
+		expect(resolveCliArgv(["cleanse", "-n", "4", "-m", "test-model"])).toEqual({
+			argv: ["cleanse", "-n", "4", "-m", "test-model"],
 		});
 	});
 });

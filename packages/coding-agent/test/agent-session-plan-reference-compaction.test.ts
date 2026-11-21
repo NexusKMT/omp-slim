@@ -59,9 +59,9 @@ function createAssistantResponse(text: string) {
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text }],
-		api: "anthropic-messages" as const,
-		provider: "anthropic" as const,
-		model: "claude-sonnet-4-5",
+		api: "openai-completions" as const,
+		provider: "test" as const,
+		model: "test-model",
 		usage: {
 			input: 0,
 			output: 0,
@@ -91,9 +91,9 @@ function emitHighUsageTurn(session: AgentSession): void {
 	const assistantMsg = {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text: "Done." }],
-		api: "anthropic-messages" as const,
-		provider: "anthropic" as const,
-		model: "claude-sonnet-4-5",
+		api: "openai-completions" as const,
+		provider: "test" as const,
+		model: "test-model",
 		stopReason: "stop" as const,
 		usage: {
 			input: 190_000,
@@ -148,9 +148,9 @@ describe("AgentSession approved-plan reference re-injection after compaction (is
 		}> = [];
 
 		const bundled = createTestModel({ provider: "test", id: "test-model" });
-		if (!bundled) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!bundled) throw new Error("Expected test-model model to exist");
 		// Pin the context window so the fixed 191k high-usage turn stays above the
-		// compaction threshold across catalog regenerations: claude-sonnet-4-5's
+		// compaction threshold across catalog regenerations: test-model's
 		// bundled window grew to 1M, which a 191k turn no longer trips. Mirrors
 		// agent-session-eager-compaction / -auto-compaction-queue.
 		const model = { ...bundled, contextWindow: 200_000, maxTokens: 64_000 };

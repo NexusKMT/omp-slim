@@ -70,10 +70,10 @@ describe("detectCacheInvalidation", () => {
 	});
 
 	it("does not flag implicit best-effort caches that report no cacheWrite", () => {
-		// Gemini/antigravity and Fireworks/glm report `cacheWrite: 0` and drop
+		// Some providers report `cacheWrite: 0` and drop
 		// `cacheRead` to zero intermittently while the prefix is unchanged — a
 		// provider propagation race that self-heals next turn, not an invalidation.
-		// Mirrors the observed gemini-3.5-flash turn (warm 40.8k read, then a cold
+		// Mirrors the observed test-model turn (warm 40.8k read, then a cold
 		// 43.1k reprocess with zero cacheWrite).
 		const prev = usage({ cacheRead: 40_789, input: 1_069, output: 353 });
 		const current = usage({ cacheRead: 0, cacheWrite: 0, input: 43_102, output: 58 });

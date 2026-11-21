@@ -166,7 +166,7 @@ describe("toolWireSchema — raw JSON Schema normalization", () => {
 });
 
 // ---------------------------------------------------------------------------
-// arkToWireSchema — `T | undefined` value-union pruning (Codex strict-mode break)
+// arkToWireSchema — `T | undefined` value-union pruning (strict-mode break)
 // ---------------------------------------------------------------------------
 
 describe("arkToWireSchema — undefined-union branch pruning", () => {

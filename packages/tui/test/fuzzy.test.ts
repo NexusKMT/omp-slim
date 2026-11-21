@@ -6,7 +6,7 @@ describe("fuzzyFilter", () => {
 		const items = [
 			{
 				label: "Image Provider",
-				text: "Image Provider providers.image openrouter Preferred provider for image generation",
+				text: "Image Provider providers.image test Preferred provider for image generation",
 			},
 			{
 				label: "Block Images",
@@ -31,9 +31,9 @@ describe("fuzzyFilter", () => {
 	});
 
 	it("still supports short word-initial abbreviations", () => {
-		const items = ["Ollama", "Kagi", "OpenCode Go", "Tavily"];
+		const items = ["Ollama", "Kagi", "Other Gateway", "Tavily"];
 
-		expect(fuzzyFilter(items, "og", item => item)).toEqual(["OpenCode Go"]);
+		expect(fuzzyFilter(items, "og", item => item)).toEqual(["Other Gateway"]);
 	});
 
 	it("filters CJK queries instead of treating them as match-all", () => {

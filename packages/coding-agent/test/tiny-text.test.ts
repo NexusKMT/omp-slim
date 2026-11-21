@@ -23,12 +23,12 @@ describe("stripCodeBlocks", () => {
 	});
 
 	it("removes literal noise inside a pasted mockup (the reported regression)", () => {
-		// A small title model titled this session "Setup Screen for Claude Code v2.1.158"
+		// A small title model titled this session "Setup Screen for Test App v2.1.158"
 		// because the version string lived inside the fenced mockup.
 		const message =
-			"lets plan a setup screen together.\nSomething like\n```\nWelcome to Claude Code v2.1.158\n[splash]\n1. Auto\n2. Dark mode\n```\nsteps: pick provider, pick theme";
+			"lets plan a setup screen together.\nSomething like\n```\nWelcome to Test App v2.1.158\n[splash]\n1. Auto\n2. Dark mode\n```\nsteps: pick provider, pick theme";
 		const stripped = stripCodeBlocks(message);
-		expect(stripped).not.toContain("Claude Code v2.1.158");
+		expect(stripped).not.toContain("Test App v2.1.158");
 		expect(stripped).toContain("pick provider, pick theme");
 	});
 

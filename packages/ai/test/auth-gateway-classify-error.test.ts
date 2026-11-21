@@ -19,9 +19,9 @@ describe("auth-gateway classifyGatewayError", () => {
 	});
 
 	it("does NOT misclassify `GenerateContentRequest` 400 as rate-limited (the original bug)", () => {
-		// Verbatim shape Google emits when functionResponse.name is missing.
+		// Verbatim shape the provider emits when functionResponse.name is missing.
 		const msg =
-			"Google API error (400): * GenerateContentRequest.contents[2].parts[0].function_response.name: Name cannot be empty.";
+			"API error (400): * GenerateContentRequest.contents[2].parts[0].function_response.name: Name cannot be empty.";
 		const c = classifyGatewayError(new Error(msg));
 		expect(c.status).toBe(400);
 		expect(c.type).toBe("invalid_request_error");
@@ -29,11 +29,11 @@ describe("auth-gateway classifyGatewayError", () => {
 
 	it("extracts embedded status codes from common message shapes", () => {
 		const cases: Array<[string, number, string]> = [
-			["OpenAI API error (429): too many requests", 429, "rate_limit_error"],
+			["API error (429): too many requests", 429, "rate_limit_error"],
 			["HTTP 503: upstream gone away", 503, "upstream_error"],
 			["status: 401 unauthorized", 401, "authentication_error"],
 			["status_code=400 — bad json", 400, "invalid_request_error"],
-			["Anthropic API error (529): overloaded", 529, "upstream_error"],
+			["API error (529): overloaded", 529, "upstream_error"],
 		];
 		for (const [msg, status, type] of cases) {
 			const c = classifyGatewayError(new Error(msg));

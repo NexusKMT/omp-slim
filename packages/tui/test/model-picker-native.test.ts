@@ -36,11 +36,11 @@ function model(provider: string, id: string, extra: Partial<Model> = {}): Model 
 }
 
 const MODELS = [
-	model("anthropic", "claude-sonnet-5-5", { int: 60 }),
-	model("anthropic", "claude-opus-5"),
+	model("test-alt", "test-alt-model-5-5", { int: 60 }),
+	model("test-alt", "test-alt-model"),
 	model("demo", "demo"),
-	model("openai", "gpt-5.6"),
-	model("openai", "gpt-5.6-mini", { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }),
+	model("test", "test-model"),
+	model("test", "test-model-mini", { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }),
 ];
 
 function source(mru: string[]): ModelHubSource {
@@ -82,17 +82,17 @@ function props(root: NativeNode): TspPickerProps {
 
 test("shows a non-default service tier's own speed aggregate", () => {
 	const perf = new Map([
-		["openai/gpt-5.6", { samples: 4, tps: 25, ttftMs: 500 }],
-		["openai/gpt-5.6@ultrafast", { samples: 2, tps: 300, ttftMs: 120 }],
-		["anthropic/claude-opus-5", { samples: 3, tps: 40, ttftMs: 300 }],
-		["openai/gpt-5.6-mini@priority", { samples: 1, tps: 90, ttftMs: 200 }],
+		["test/test-model", { samples: 4, tps: 25, ttftMs: 500 }],
+		["test/test-model@ultrafast", { samples: 2, tps: 300, ttftMs: 120 }],
+		["test-alt/test-alt-model", { samples: 3, tps: 40, ttftMs: 300 }],
+		["test/test-model-mini@priority", { samples: 1, tps: 90, ttftMs: 200 }],
 	]);
 	const hub = new ModelHubComponent(
 		ui,
 		{
 			...source(["demo/demo"]),
 			modelPerf: perf,
-			serviceTierFor: model => (model.provider === "openai" ? "ultrafast" : undefined),
+			serviceTierFor: model => (model.provider === "test" ? "ultrafast" : undefined),
 		},
 		registry(MODELS),
 		MODELS.map(entry => ({ model: entry })),
@@ -103,9 +103,9 @@ test("shows a non-default service tier's own speed aggregate", () => {
 	const items = props(hub.describe(withPicker)).items ?? [];
 	const speed = (id: string) => items.find(entry => entry.id === id)?.facts?.speed;
 	// The tier the host would send wins over the standard aggregate.
-	expect(speed("openai/gpt-5.6")).toBe("300 ultrafast");
+	expect(speed("test/test-model")).toBe("300 ultrafast");
 	// No tier configured for the family: the standard aggregate, unlabeled.
-	expect(speed("anthropic/claude-opus-5")).toBe("40");
+	expect(speed("test-alt/test-alt-model")).toBe("40");
 	// Only a tier aggregate exists: show it rather than nothing.
-	expect(speed("openai/gpt-5.6-mini")).toBe("90 priority");
+	expect(speed("test/test-model-mini")).toBe("90 priority");
 });

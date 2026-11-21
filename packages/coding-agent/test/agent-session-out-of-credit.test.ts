@@ -35,7 +35,7 @@ describe("AgentSession out-of-credit handling", () => {
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@pi-out-of-credit-");
 		vi.spyOn(envApiKey, "getEnvApiKey").mockReturnValue(undefined);
-		authStorage.keys.removeRuntime("anthropic");
+		authStorage.keys.removeRuntime("test");
 		sessions = [];
 	});
 
@@ -58,7 +58,7 @@ describe("AgentSession out-of-credit handling", () => {
 		retryEndEvents: RetryEndEvent[];
 	}> {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
+		if (!model) throw new Error("Expected bundled test model to exist");
 		authStorage.keys.setRuntime("test", "test-key");
 
 		const mock = createMockModel({

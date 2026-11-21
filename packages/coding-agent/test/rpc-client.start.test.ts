@@ -8,7 +8,7 @@ describe("RpcClient.start", () => {
 			cliPath: path.join(import.meta.dir, "..", "src", "cli.ts"),
 			cwd: path.join(import.meta.dir, ".."),
 			provider: "__missing_provider__",
-			model: "claude-sonnet-4-5",
+			model: "test-model",
 			env: { PI_NO_TITLE: "1" },
 		});
 
@@ -21,7 +21,7 @@ describe("RpcClient.start", () => {
 				received = args;
 				return [process.execPath, "--eval", "process.exit(1)"];
 			},
-			provider: "openrouter",
+			provider: "test",
 			model: "example/model",
 			args: ["--no-session"],
 		});
@@ -31,7 +31,7 @@ describe("RpcClient.start", () => {
 			"--mode",
 			"rpc",
 			"--provider",
-			"openrouter",
+			"test",
 			"--model",
 			"example/model",
 			"--no-session",

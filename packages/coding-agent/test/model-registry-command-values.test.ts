@@ -84,7 +84,7 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 
 		const registry = new ModelRegistry(authStorage, modelsPath);
 		expect(registry.hasCommandBackedApiKey("custom-proxy")).toBe(true);
-		expect(registry.hasCommandBackedApiKey("openai")).toBe(false);
+		expect(registry.hasCommandBackedApiKey("test")).toBe(false);
 		const models = registry.getAll().filter(model => model.provider === "custom-proxy");
 
 		expect(models.length).toBeGreaterThan(1);

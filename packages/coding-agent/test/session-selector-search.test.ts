@@ -200,7 +200,7 @@ describe("session picker incremental search", () => {
 			makeSession("c-partial", { title: "Old dashboard", created: new Date(2) }),
 			makeSession("d-exact", { title: "dashboard", created: new Date(2) }),
 		];
-		// Codex lists equal-mtime sessions by ID ascending, regardless of creation time.
+		// The CLI lists equal-mtime sessions by ID ascending, regardless of creation time.
 		const harness = makeHarness(sessions);
 		harness.type("dashboard");
 		const expected = ["b-exact", "d-exact", "a-partial", "c-partial"];

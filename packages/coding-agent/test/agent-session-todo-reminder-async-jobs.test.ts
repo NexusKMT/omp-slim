@@ -73,9 +73,9 @@ describe("AgentSession todo reminder async-job deferral", () => {
 		return {
 			role: "assistant",
 			content: [{ type: "text", text: "paused at your instruction" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "stop",
 			usage: {
 				input: 100,
@@ -132,7 +132,7 @@ describe("AgentSession todo reminder async-job deferral", () => {
 		} as unknown as ExtensionRunner;
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,

@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe("task label generation", () => {
 	it("settles when its executor cancellation signal aborts an in-flight title request", async () => {
-		const model = getModelOrThrow("claude-sonnet-4-5");
+		const model = getModelOrThrow("test-model");
 		const controller = new AbortController();
 		const started = Promise.withResolvers<void>();
 		const response = Promise.withResolvers<ai.AssistantMessage>();
@@ -63,7 +63,7 @@ describe("task label generation", () => {
 	});
 
 	it("rejects a generated label that only echoes the spawn handle", async () => {
-		const model = getModelOrThrow("claude-sonnet-4-5");
+		const model = getModelOrThrow("test-model");
 		vi.spyOn(ai, "completeSimple").mockResolvedValue({
 			stopReason: "stop",
 			content: [{ type: "text", text: "<title>AuthLoader</title>" }],

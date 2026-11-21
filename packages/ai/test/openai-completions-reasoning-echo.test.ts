@@ -12,7 +12,7 @@ function fixture(handler: (request: Request) => Response | Promise<Response>): M
 	const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: handler });
 	servers.push(server);
 	return buildModel({
-		id: "deepseek-class",
+		id: "test-model",
 		provider: "explicit-gateway",
 		baseUrl: `http://127.0.0.1:${server.port}/v1`,
 		input: ["text"],
@@ -47,7 +47,7 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
 	};
 }
 
-describe("DeepSeek-class reasoning replay", () => {
+describe("test-model reasoning replay", () => {
 	it("echoes signed thinking back as reasoning_content on the next request", async () => {
 		const requests: Record<string, unknown>[] = [];
 		const model = fixture(async request => {
@@ -116,7 +116,7 @@ describe("DeepSeek-class reasoning replay", () => {
 				{ role: "user" as const, content: "hi", timestamp: 0 },
 				assistant([
 					{ type: "thinking", thinking: "plain thinking" },
-					{ type: "thinking", thinking: "signed elsewhere", thinkingSignature: "anthropic-signature" },
+					{ type: "thinking", thinking: "signed elsewhere", thinkingSignature: "foreign-signature" },
 					{ type: "text", text: "answer" },
 				]),
 				{ role: "user" as const, content: "again", timestamp: 2 },

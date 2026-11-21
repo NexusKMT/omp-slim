@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 async function createHarness() {
-	const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+	const model = createMockModel({ provider: "test", id: "test-model" }).model;
 	const assistantWithToolCall = {
 		...createAssistantMessage(""),
 		content: [{ type: "toolCall" as const, id: "call-1", name: "bash", arguments: { command: "echo hi" } }],

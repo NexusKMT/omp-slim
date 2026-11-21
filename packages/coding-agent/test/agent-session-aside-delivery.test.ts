@@ -52,7 +52,7 @@ describe("AgentSession aside delivery", () => {
 	});
 
 	it("an aside delivered mid-run neither aborts the in-flight tool nor waits for the run to end", async () => {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -153,7 +153,7 @@ describe("AgentSession aside delivery", () => {
 	it.each([false, true])(
 		"a user aside ends an owned-job wait without consuming the later job result (agent registry: %s)",
 		async withRegistry => {
-			const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+			const model = createMockModel({ provider: "test", id: "test-model" }).model;
 			const contexts: Context[] = [];
 			const nextCall = Promise.withResolvers<void>();
 			const waitStarted = Promise.withResolvers<void>();
@@ -260,7 +260,7 @@ describe("AgentSession aside delivery", () => {
 	);
 
 	it("sendUserMessage delivered as an aside mid-run injects at the next step boundary without draining agent-core queues", async () => {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -355,7 +355,7 @@ describe("AgentSession aside delivery", () => {
 		const started = Promise.withResolvers<void>();
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -408,7 +408,7 @@ describe("AgentSession aside delivery", () => {
 	});
 
 	it("an idle session receiving an aside starts a turn", async () => {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -458,7 +458,7 @@ describe("AgentSession aside delivery", () => {
 	});
 
 	it("two asides sent back to back to an idle session both reach the model, in order", async () => {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -524,7 +524,7 @@ describe("AgentSession aside delivery", () => {
 		const contexts: Context[] = [];
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -581,7 +581,7 @@ describe("AgentSession aside delivery", () => {
 		const contexts: Context[] = [];
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -641,7 +641,7 @@ describe("AgentSession aside delivery", () => {
 		// observation and dispatch, so a turn can start streaming in that gap. Its internal
 		// isStreaming re-check must honor the caller's original "aside" intent (via
 		// `streamingBehavior: "aside"`) instead of degrading it into a tool-aborting steer.
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -735,14 +735,14 @@ describe("AgentSession aside delivery", () => {
 	});
 
 	it("#queueCustomMessage resumes a stranded aside instead of leaving it queued with no loop to drain it", async () => {
-		// Regression for the race Codex flagged in #queueCustomMessage: it awaits image
+		// Regression for the race flagged in #queueCustomMessage: it awaits image
 		// normalization before calling IrcBridge.queueAside, so the active run can settle to
 		// idle during that await. If the queueAside call doesn't also resume stranded asides
 		// (as #queueUserMessage's aside branch already does), the record sits in the queue with
 		// no loop left to drain it until an unrelated prompt happens to flush it. Exercising
 		// promptCustomMessage's queueOnly path (used by main.ts's synthetic-continue queue) on an
 		// already-idle session hits the exact same #queueCustomMessage code path this covers.
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -805,7 +805,7 @@ describe("AgentSession aside delivery", () => {
 		// cases identically and always started a fresh autonomous turn, undoing a deliberate
 		// interrupt. Simulate the second case directly: abort with a user interrupt (which sets
 		// autoResumeSuppressed), then send the aside on the now-idle session.
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -885,7 +885,7 @@ describe("AgentSession aside delivery", () => {
 		// await), the helper returns before ever calling agent.prompt — callers that treat the
 		// boolean as proof of dispatched agent work (e.g. RPC's hasAgentMessageTask gate) must see
 		// `false`, not a stale `true` that leaves them waiting on events that never arrive.
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 
@@ -1157,7 +1157,7 @@ describe("AgentSession aside delivery", () => {
 		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -1245,7 +1245,7 @@ describe("AgentSession aside delivery", () => {
 		// when the send began while streaming because it expects that event — without it the
 		// persisted message stays invisible until an unrelated rebuild. Plan mode is the
 		// deterministic way to reach the fold branch without racing a real stream settle.
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -1295,7 +1295,7 @@ describe("AgentSession aside delivery", () => {
 		// captured generation. An image attachment whose normalization outlives a concurrent
 		// newSession() used to prompt or fold the stale message into the newly created session.
 		const modelRegistry = new ModelRegistry(authStorage);
-		const mock = createMockModel({ provider: "test", id: "gpt-test" });
+		const mock = createMockModel({ provider: "test", id: "test-model" });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
@@ -1355,7 +1355,7 @@ describe("AgentSession aside delivery", () => {
 		let callCount = 0;
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -1442,7 +1442,7 @@ describe("AgentSession aside delivery", () => {
 		const contexts: Context[] = [];
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -1556,7 +1556,7 @@ describe("AgentSession aside delivery", () => {
 		const events: string[] = [];
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					started.resolve();
@@ -1642,7 +1642,7 @@ describe("AgentSession aside delivery", () => {
 		const events: string[] = [];
 		const mock = createMockModel({
 			provider: "test",
-			id: "gpt-test",
+			id: "test-model",
 			responses: [
 				() => {
 					wakeModelCalled.resolve();

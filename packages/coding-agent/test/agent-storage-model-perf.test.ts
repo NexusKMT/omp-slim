@@ -60,19 +60,19 @@ describe("AgentStorage model perf aggregates", () => {
 		// 1000 tokens over 6000ms + 500 tokens over 3000ms → 1500 tokens / 9s → 166.67 t/s
 		// Back-to-back samples join one deferred batch; awaiting the shared flush
 		// promise makes both visible.
-		const first = storage.recordModelPerf("openai/gpt-5", {
+		const first = storage.recordModelPerf("test/test-model-1", {
 			outputTokens: 1000,
 			durationMs: 6000,
 			ttftMs: 1000,
 		});
-		const second = storage.recordModelPerf("openai/gpt-5", {
+		const second = storage.recordModelPerf("test/test-model-1", {
 			outputTokens: 500,
 			durationMs: 3000,
 			ttftMs: 500,
 		});
 		await flushPerf(first, second);
 
-		const stats = storage.getModelPerf().get("openai/gpt-5");
+		const stats = storage.getModelPerf().get("test/test-model-1");
 		expect(stats).toBeDefined();
 		expect(stats?.samples).toBe(2);
 		expect(stats?.tps).toBeCloseTo(1500000 / 9000, 5);
@@ -82,28 +82,28 @@ describe("AgentStorage model perf aggregates", () => {
 	it("keeps a non-default service tier's samples in their own row", async () => {
 		const storage = await openStorage();
 
-		const standard = storage.recordModelPerf("openai-codex/gpt-6-astra", {
+		const standard = storage.recordModelPerf("test/test-model-2", {
 			outputTokens: 100,
 			durationMs: 4000,
 		});
 		const ultrafast = storage.recordModelPerf(
-			"openai-codex/gpt-6-astra",
+			"test/test-model-2",
 			{ outputTokens: 3000, durationMs: 10000 },
 			"ultrafast",
 		);
 		// `default`/`auto` are the standard serving path, so they share the bare row.
 		const explicitDefault = storage.recordModelPerf(
-			"openai-codex/gpt-6-astra",
+			"test/test-model-2",
 			{ outputTokens: 100, durationMs: 4000 },
 			"default",
 		);
 		await flushPerf(standard, ultrafast, explicitDefault);
 
 		const perf = storage.getModelPerf();
-		expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(2);
-		expect(perf.get("openai-codex/gpt-6-astra")?.tps).toBeCloseTo(200000 / 8000, 5);
-		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
-		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.tps).toBeCloseTo(300, 5);
+		expect(perf.get("test/test-model-2")?.samples).toBe(2);
+		expect(perf.get("test/test-model-2")?.tps).toBeCloseTo(200000 / 8000, 5);
+		expect(perf.get("test/test-model-2@ultrafast")?.samples).toBe(1);
+		expect(perf.get("test/test-model-2@ultrafast")?.tps).toBeCloseTo(300, 5);
 	});
 
 	it("records a session turn under the tier the provider reported serving", async () => {
@@ -119,9 +119,9 @@ describe("AgentStorage model perf aggregates", () => {
 			const registry = new ModelRegistry(auth, path.join(tempDir.path(), "models.yml"));
 			registry.getApiKey = async () => "test-key";
 			const model = buildModel({
-				provider: "openai-codex",
-				id: "gpt-6-astra",
-				name: "GPT-6 Astra",
+				provider: "test",
+				id: "test-model-2",
+				name: "Test Model",
 				api: "openai-completions",
 				baseUrl: "https://example.com",
 				reasoning: true,
@@ -131,8 +131,8 @@ describe("AgentStorage model perf aggregates", () => {
 				maxTokens: 32_000,
 			});
 			const mock = createMockModel({
-				id: "gpt-6-astra",
-				provider: "openai-codex",
+				id: "test-model-2",
+				provider: "test",
 				responses: [
 					// The backend downgraded the requested ultrafast turn: the echo is what
 					// the row must follow, not the session's live setting.
@@ -162,8 +162,8 @@ describe("AgentStorage model perf aggregates", () => {
 
 			const reopened = await AgentStorage.open(dbPath);
 			const perf = reopened.getModelPerf();
-			expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(1);
-			expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
+			expect(perf.get("test/test-model-2")?.samples).toBe(1);
+			expect(perf.get("test/test-model-2@ultrafast")?.samples).toBe(1);
 		} finally {
 			auth.close();
 		}
@@ -172,19 +172,19 @@ describe("AgentStorage model perf aggregates", () => {
 	it("persists a still-batched sample when the storage closes before the window elapses", async () => {
 		const storage = await openStorage();
 		const dbPath = path.join(tempDir.path(), "agent.db");
-		void storage.recordModelPerf("openai/gpt-5", { outputTokens: 600, durationMs: 3000 });
+		void storage.recordModelPerf("test/test-model-1", { outputTokens: 600, durationMs: 3000 });
 
 		AgentStorage.close();
 		const reopened = await AgentStorage.open(dbPath);
 
-		expect(reopened.getModelPerf().get("openai/gpt-5")?.tps).toBeCloseTo(200, 5);
+		expect(reopened.getModelPerf().get("test/test-model-1")?.tps).toBeCloseTo(200, 5);
 	});
 
 	it("includes a still-batched sample in an in-process read without waiting for the window", async () => {
 		const storage = await openStorage();
-		void storage.recordModelPerf("openai/gpt-5", { outputTokens: 600, durationMs: 3000 });
+		void storage.recordModelPerf("test/test-model-1", { outputTokens: 600, durationMs: 3000 });
 
-		expect(storage.getModelPerf().get("openai/gpt-5")?.tps).toBeCloseTo(200, 5);
+		expect(storage.getModelPerf().get("test/test-model-1")?.tps).toBeCloseTo(200, 5);
 	});
 
 	it("records task subagent samples in the shared model performance aggregate", async () => {
@@ -192,14 +192,14 @@ describe("AgentStorage model perf aggregates", () => {
 		const parent = await Settings.loadIsolated({ cwd: tempDir.path(), agentDir: tempDir.path() });
 		const subagent = createSubagentSettings(parent);
 
-		const write = subagent.getStorage()!.recordModelPerf("opencode-go/deepseek-v4-flash", {
+		const write = subagent.getStorage()!.recordModelPerf("test/test-model-3", {
 			outputTokens: 130,
 			durationMs: 2989.23775,
 			ttftMs: 2324.873,
 		});
 		await flushPerf(write);
 
-		const stats = parent.getStorage()?.getModelPerf().get("opencode-go/deepseek-v4-flash");
+		const stats = parent.getStorage()?.getModelPerf().get("test/test-model-3");
 		expect(stats?.samples).toBe(1);
 		expect(stats?.tps).toBeCloseTo(130000 / 2989.23775, 5);
 		expect(stats?.ttftMs).toBeCloseTo(2324.873, 5);
@@ -209,10 +209,10 @@ describe("AgentStorage model perf aggregates", () => {
 		const storage = await openStorage();
 
 		// No ttft → 1000 tokens / 4s → 250 t/s
-		const write = storage.recordModelPerf("zai/glm-5", { outputTokens: 1000, durationMs: 4000 });
+		const write = storage.recordModelPerf("test/test-model-4", { outputTokens: 1000, durationMs: 4000 });
 		await flushPerf(write);
 
-		const stats = storage.getModelPerf().get("zai/glm-5");
+		const stats = storage.getModelPerf().get("test/test-model-4");
 		expect(stats?.tps).toBeCloseTo(250, 5);
 		expect(stats?.ttftMs).toBeNull();
 	});
@@ -223,20 +223,20 @@ describe("AgentStorage model perf aggregates", () => {
 		// Same duration and token count, wildly different TTFT: a provider that
 		// hides reasoning until late (ttft ~ duration) must not report inflated
 		// throughput vs one that streams from the start.
-		const hiddenWrite = storage.recordModelPerf("google/gemini", {
+		const hiddenWrite = storage.recordModelPerf("test/test-model-5", {
 			outputTokens: 1020,
 			durationMs: 7000,
 			ttftMs: 5700,
 		});
-		const streamedWrite = storage.recordModelPerf("google-vertex/gemini", {
+		const streamedWrite = storage.recordModelPerf("test/test-model-6", {
 			outputTokens: 1020,
 			durationMs: 7000,
 			ttftMs: 1700,
 		});
 		await flushPerf(hiddenWrite, streamedWrite);
 
-		const hidden = storage.getModelPerf().get("google/gemini");
-		const streamed = storage.getModelPerf().get("google-vertex/gemini");
+		const hidden = storage.getModelPerf().get("test/test-model-5");
+		const streamed = storage.getModelPerf().get("test/test-model-6");
 		expect(hidden?.tps).toBeCloseTo(1020000 / 7000, 5);
 		expect(streamed?.tps).toBeCloseTo(1020000 / 7000, 5);
 	});
@@ -244,11 +244,11 @@ describe("AgentStorage model perf aggregates", () => {
 	it("drops unmeasurable samples instead of polluting the aggregates", async () => {
 		const storage = await openStorage();
 
-		await storage.recordModelPerf("openai/gpt-5", { outputTokens: 0, durationMs: 4000 });
-		await storage.recordModelPerf("openai/gpt-5", { outputTokens: 100, durationMs: 0 });
-		await storage.recordModelPerf("openai/gpt-5", { outputTokens: Number.NaN, durationMs: 4000 });
+		await storage.recordModelPerf("test/test-model-1", { outputTokens: 0, durationMs: 4000 });
+		await storage.recordModelPerf("test/test-model-1", { outputTokens: 100, durationMs: 0 });
+		await storage.recordModelPerf("test/test-model-1", { outputTokens: Number.NaN, durationMs: 4000 });
 
-		expect(storage.getModelPerf().has("openai/gpt-5")).toBe(false);
+		expect(storage.getModelPerf().has("test/test-model-1")).toBe(false);
 	});
 
 	it("skips rows with a NULL model key so perf keys stay selectors", async () => {
@@ -258,27 +258,27 @@ describe("AgentStorage model perf aggregates", () => {
 			// `TEXT PRIMARY KEY` admits NULL; the model browser iterates every key as a string.
 			db.run("INSERT INTO model_perf (model_key, samples, output_tokens, gen_ms) VALUES (NULL, 3, 300, 3000)");
 			db.run(
-				"INSERT INTO model_perf (model_key, samples, output_tokens, gen_ms) VALUES ('openai/gpt-5', 3, 300, 3000)",
+				"INSERT INTO model_perf (model_key, samples, output_tokens, gen_ms) VALUES ('test/test-model-1', 3, 300, 3000)",
 			);
 		} finally {
 			db.close();
 		}
 
-		expect([...storage.getModelPerf().keys()]).toEqual(["openai/gpt-5"]);
+		expect([...storage.getModelPerf().keys()]).toEqual(["test/test-model-1"]);
 	});
 
 	it("ignores out-of-range TTFT but keeps the throughput sample", async () => {
 		const storage = await openStorage();
 
 		// ttft >= duration is bogus latency data; the sample still measures TPS.
-		const write = storage.recordModelPerf("openai/gpt-5", {
+		const write = storage.recordModelPerf("test/test-model-1", {
 			outputTokens: 1000,
 			durationMs: 4000,
 			ttftMs: 5000,
 		});
 		await flushPerf(write);
 
-		const stats = storage.getModelPerf().get("openai/gpt-5");
+		const stats = storage.getModelPerf().get("test/test-model-1");
 		expect(stats?.tps).toBeCloseTo(250, 5);
 		expect(stats?.ttftMs).toBeNull();
 	});
@@ -296,27 +296,27 @@ describe("AgentStorage model perf aggregates", () => {
 		using insert = statsDb.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)");
 		const now = Date.now();
 		// Two valid turns totaling 1500 tokens over 8.5s, one with ttft missing.
-		insert.run("openai", "gpt-5", 1000, 6000, 1000, "stop", now - 5000);
-		insert.run("openai", "gpt-5", 500, 2500, null, "stop", now - 4000);
+		insert.run("test", "test-model-1", 1000, 6000, 1000, "stop", now - 5000);
+		insert.run("test", "test-model-1", 500, 2500, null, "stop", now - 4000);
 		// Errored and empty turns must not pollute the averages.
-		insert.run("openai", "gpt-5", 9999, 1, null, "error", now - 3000);
-		insert.run("openai", "gpt-5", 0, 4000, null, "stop", now - 2000);
+		insert.run("test", "test-model-1", 9999, 1, null, "error", now - 3000);
+		insert.run("test", "test-model-1", 0, 4000, null, "stop", now - 2000);
 		// Rows older than the recency window are stale provider speeds; skip them.
-		insert.run("openai", "gpt-5", 100_000, 1000, null, "stop", now - 120 * 86_400_000);
-		insert.run("zai", "glm-5", 300, 3000, 1000, "aborted", now - 1000);
+		insert.run("test", "test-model-1", 100_000, 1000, null, "stop", now - 120 * 86_400_000);
+		insert.run("test", "test-model-4", 300, 3000, 1000, "aborted", now - 1000);
 		statsDb.close();
 
 		const imported = await storage.backfillModelPerfFromStats(statsDbPath);
 
 		expect(imported).toBe(3);
-		const gpt = storage.getModelPerf().get("openai/gpt-5");
+		const model1 = storage.getModelPerf().get("test/test-model-1");
 		// 1500 tokens over 6000ms + 2500ms total durations → 176.47 t/s.
-		expect(gpt?.samples).toBe(2);
-		expect(gpt?.tps).toBeCloseTo(1500000 / 8500, 5);
-		expect(gpt?.ttftMs).toBeCloseTo(1000, 5);
+		expect(model1?.samples).toBe(2);
+		expect(model1?.tps).toBeCloseTo(1500000 / 8500, 5);
+		expect(model1?.ttftMs).toBeCloseTo(1000, 5);
 		// Aborted turns with reported usage are valid samples, like live capture.
-		const glm = storage.getModelPerf().get("zai/glm-5");
-		expect(glm?.tps).toBeCloseTo(100, 5);
+		const model4 = storage.getModelPerf().get("test/test-model-4");
+		expect(model4?.tps).toBeCloseTo(100, 5);
 	});
 
 	it("imports a served tier's history into its own row", async () => {
@@ -330,8 +330,8 @@ describe("AgentStorage model perf aggregates", () => {
 		)`);
 		using insert = statsDb.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 		const now = Date.now();
-		insert.run("openai-codex", "gpt-6-astra", 100, 4000, null, "stop", now - 3000, null);
-		insert.run("openai-codex", "gpt-6-astra", 3000, 10000, null, "stop", now - 2000, "ultrafast");
+		insert.run("test", "test-model-2", 100, 4000, null, "stop", now - 3000, null);
+		insert.run("test", "test-model-2", 3000, 10000, null, "stop", now - 2000, "ultrafast");
 		statsDb.close();
 
 		await storage.backfillModelPerfFromStats(statsDbPath);
@@ -339,8 +339,8 @@ describe("AgentStorage model perf aggregates", () => {
 		const perf = storage.getModelPerf();
 		// The standard turn stays the standard aggregate; the ultrafast turn does not
 		// drag it up.
-		expect(perf.get("openai-codex/gpt-6-astra")?.tps).toBeCloseTo(25, 5);
-		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.tps).toBeCloseTo(300, 5);
+		expect(perf.get("test/test-model-2")?.tps).toBeCloseTo(25, 5);
+		expect(perf.get("test/test-model-2@ultrafast")?.tps).toBeCloseTo(300, 5);
 	});
 
 	it("caps the backfill at the newest samples per model", async () => {
@@ -360,7 +360,7 @@ describe("AgentStorage model perf aggregates", () => {
 		statsDb.transaction(() => {
 			for (let i = 0; i < 257; i++) {
 				const excludedOldest = i === 0;
-				insert.run("openai", "gpt-5", excludedOldest ? 10_000 : 100, 1000, null, "stop", now - (257 - i) * 1000);
+				insert.run("test", "test-model-1", excludedOldest ? 10_000 : 100, 1000, null, "stop", now - (257 - i) * 1000);
 			}
 		})();
 		statsDb.close();
@@ -368,7 +368,7 @@ describe("AgentStorage model perf aggregates", () => {
 		const imported = await storage.backfillModelPerfFromStats(statsDbPath);
 
 		expect(imported).toBe(256);
-		const stats = storage.getModelPerf().get("openai/gpt-5");
+		const stats = storage.getModelPerf().get("test/test-model-1");
 		expect(stats?.samples).toBe(256);
 		expect(stats?.tps).toBeCloseTo(100, 5);
 	});
@@ -402,14 +402,14 @@ describe("AgentStorage model perf aggregates", () => {
 				"fs.mkdirSync(path.dirname(statsPath), { recursive: true });",
 				"const statsDb = new Database(statsPath);",
 				'statsDb.run("CREATE TABLE messages (provider TEXT, model TEXT, output_tokens INTEGER, duration INTEGER, ttft INTEGER, stop_reason TEXT, timestamp INTEGER, service_tier TEXT)");',
-				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ["openai", "synced-model", 20, 2000, null, "stop", Date.now(), null]);',
+				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ["test", "test-model-synced", 20, 2000, null, "stop", Date.now(), null]);',
 				"statsDb.close();",
 				// A v1 install: the marker is set and the aggregates hold live samples.
 				"await AgentStorage.open();",
 				"AgentStorage.close();",
 				"const agentDb = new Database(getAgentDbPath());",
 				'agentDb.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["model_perf_backfill", "complete"]);',
-				'agentDb.run("INSERT OR REPLACE INTO model_perf (model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms) VALUES (?, ?, ?, ?, ?, ?)", ["openai-codex/gpt-6-astra", 40, 40000, 400000, 0, 0]);',
+				'agentDb.run("INSERT OR REPLACE INTO model_perf (model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms) VALUES (?, ?, ?, ?, ?, ?)", ["test/test-model-2", 40, 40000, 400000, 0, 0]);',
 				"agentDb.close();",
 				// Reopening and reading runs the v2 migration.
 				"const storage = await AgentStorage.open();",
@@ -417,7 +417,7 @@ describe("AgentStorage model perf aggregates", () => {
 				"const markerDb = new Database(getAgentDbPath(), { readonly: true });",
 				"const marker = markerDb.query(\"SELECT value FROM meta WHERE key = 'model_perf_backfill_v2'\").get();",
 				"markerDb.close();",
-				"console.error(JSON.stringify({ keys: [...perf.keys()], astra: perf.get('openai-codex/gpt-6-astra'), marker }));",
+				"console.error(JSON.stringify({ keys: [...perf.keys()], astra: perf.get('test/test-model-2'), marker }));",
 				"AgentStorage.close();",
 			].join("\n"),
 			env,
@@ -429,7 +429,7 @@ describe("AgentStorage model perf aggregates", () => {
 			marker: { value: string } | null;
 		};
 		// The live row survives untouched and nothing is re-imported on top of it.
-		expect(result.keys).toEqual(["openai-codex/gpt-6-astra"]);
+		expect(result.keys).toEqual(["test/test-model-2"]);
 		expect(result.astra.samples).toBe(40);
 		expect(result.astra.tps).toBeCloseTo(100, 5);
 		expect(result.marker).toEqual({ value: "complete" });
@@ -463,10 +463,10 @@ describe("AgentStorage model perf aggregates", () => {
 				"fs.mkdirSync(path.dirname(statsPath), { recursive: true });",
 				"const statsDb = new Database(statsPath);",
 				'statsDb.run("CREATE TABLE messages (provider TEXT, model TEXT, output_tokens INTEGER, duration INTEGER, ttft INTEGER, stop_reason TEXT, timestamp INTEGER)");',
-				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)", ["openai", "repro", 20, 2000, null, "stop", Date.now()]);',
+				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)", ["test", "test-model-repro", 20, 2000, null, "stop", Date.now()]);',
 				"statsDb.close();",
 				"const storage = await AgentStorage.open();",
-				'void storage.recordModelPerf("openai/repro", { outputTokens: 10, durationMs: 1000 });',
+				'void storage.recordModelPerf("test/test-model-repro", { outputTokens: 10, durationMs: 1000 });',
 				"process.exit(0);",
 			].join("\n"),
 			env,
@@ -490,7 +490,7 @@ describe("AgentStorage model perf aggregates", () => {
 			expect(
 				db
 					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
-						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/repro'",
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'test/test-model-repro'",
 					)
 					.get(),
 			).toEqual({ samples: 2, output_tokens: 30, gen_ms: 3000 });
@@ -510,7 +510,7 @@ describe("AgentStorage model perf aggregates", () => {
 			[
 				`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
 				`const storage = await AgentStorage.open(${JSON.stringify(dbPath)});`,
-				'void storage.recordModelPerf("openai/natural-exit", { outputTokens: 10, durationMs: 1000 });',
+				'void storage.recordModelPerf("test/test-model-natural-exit", { outputTokens: 10, durationMs: 1000 });',
 			].join("\n"),
 			{ ...process.env, HOME: tempDir.path(), USERPROFILE: tempDir.path() },
 		);
@@ -522,7 +522,7 @@ describe("AgentStorage model perf aggregates", () => {
 		try {
 			expect(
 				db
-					.query<{ samples: number }, []>("SELECT samples FROM model_perf WHERE model_key = 'openai/natural-exit'")
+					.query<{ samples: number }, []>("SELECT samples FROM model_perf WHERE model_key = 'test/test-model-natural-exit'")
 					.get(),
 			).toEqual({ samples: 1 });
 		} finally {

@@ -112,8 +112,8 @@ describe("renderPlaceholders", () => {
 	});
 
 	it("routes registered model labels with spaces and parentheses as whole tokens", () => {
-		const short = modelMentionChipLabel("Claude");
-		const long = modelMentionChipLabel("Claude (Fast)");
+		const short = modelMentionChipLabel("Test Model");
+		const long = modelMentionChipLabel("Test Model (Fast)");
 		const { out, mentions, refs } = capture(`ask ${long} then ${short}`, [short, long]);
 		expect(mentions).toEqual([long, short]);
 		expect(refs).toHaveLength(0);
@@ -121,7 +121,7 @@ describe("renderPlaceholders", () => {
 	});
 
 	it("dispatches an ASCII model label before bracketed attachment markers", () => {
-		const label = "[M] Claude (Fast)";
+		const label = "[M] Test Model (Fast)";
 		const { out, mentions, refs } = capture(`ask ${label} now`, [label]);
 		expect(mentions).toEqual([label]);
 		expect(refs).toHaveLength(0);

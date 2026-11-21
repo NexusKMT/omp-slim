@@ -30,8 +30,8 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -73,9 +73,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 			emitBeforeAgentStart: async () => undefined,
 		};
 
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) {
-			throw new Error("Expected built-in anthropic model to exist");
+			throw new Error("Expected built-in test model to exist");
 		}
 		const model = {
 			...bundled,
@@ -147,9 +147,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: PAYLOAD_ERROR_MESSAGE,
 			usage: {
@@ -170,9 +170,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorStatus: 413,
 			errorMessage: "Content Too Large",
@@ -194,9 +194,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: image count exceeds the limit of 20",
 			usage: {
@@ -222,9 +222,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: `${PAYLOAD_ERROR_MESSAGE} for model llava-vision`,
 			usage: {
@@ -248,9 +248,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: too many images",
 			usage: {
@@ -274,9 +274,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: maximum of 20 images allowed",
 			usage: {
@@ -299,9 +299,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: the number of images exceeds the maximum",
 			usage: {
@@ -326,9 +326,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: image is too large",
 			usage: {
@@ -354,9 +354,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: image dimensions exceed 8000 pixels",
 			usage: {
@@ -377,9 +377,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: image count exceeds the limit of 20",
 			usage: {
@@ -404,9 +404,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const message = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: PAYLOAD_ERROR_MESSAGE,
 			usage: {
@@ -542,9 +542,9 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		const assistantMsg = {
 			role: "assistant",
 			content: [{ type: "text", text: "" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "prompt is too long: 300000 tokens > 200000 maximum",
 			usage: {
@@ -1103,13 +1103,13 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	}
 
 	it("keeps usage-backed payload overflows off the configured chain", async () => {
-		const fallbackModel = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
+		const fallbackModel = createTestModel({ provider: "test", id: "test-model-2" });
 		if (!fallbackModel) {
-			throw new Error("Expected bundled openai fallback model to exist");
+			throw new Error("Expected bundled test fallback model to exist");
 		}
 
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
 		let failedOnce = false;
 		await createSession(200_000, undefined, {
@@ -1144,13 +1144,13 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.waitForIdle();
 
 		expect(fallbackEvents).toHaveLength(0);
-		expect(requestedModels.every(m => m.startsWith("anthropic/"))).toBe(true);
+		expect(requestedModels.every(m => m.startsWith("test/"))).toBe(true);
 		expect(startCount()).toBeGreaterThanOrEqual(1);
 	});
 
 	it("exposes a terminal live 413 to the task consumer without goal reminders", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(200_000, undefined, {
 			streamFn: (model, context, options) => {
 				requestedModels.push(`${model.provider}/${model.id}`);
@@ -1165,7 +1165,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
@@ -1180,7 +1180,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	it("retains a live 413 after configured shake reclaims nothing", async () => {
 		const requestedModels: string[] = [];
-		const provider = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const provider = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(200_000, undefined, {
 			streamFn: (model, context, options) => {
 				requestedModels.push(`${model.provider}/${model.id}`);
@@ -1192,7 +1192,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("Review this image.");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		expect(session.getLastAssistantMessage()?.stopReason).toBe("error");
 		expect(session.getLastAssistantMessage()?.errorMessage).toContain("413");
 		expect(
@@ -1202,7 +1202,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	it("keeps an explicit single-image limit terminal even with summary compaction configured", async () => {
 		const requestedModels: string[] = [];
-		const provider = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const provider = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(200_000, undefined, {
 			streamFn: (model, context, options) => {
 				requestedModels.push(`${model.provider}/${model.id}`);
@@ -1231,7 +1231,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		});
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		expect(starts()).toBe(0);
 		expect(session.getLastAssistantMessage()?.stopReason).toBe("error");
 		expect(session.getLastAssistantMessage()?.errorMessage).toContain("image is too large");
@@ -1239,7 +1239,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 
 	it("does not blind-resend a transient-wrapped payload rejection before maintenance sees it", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			200_000,
 			{ toolText: "seed" },
@@ -1258,7 +1258,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("hello");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
@@ -1266,7 +1266,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 	it("believes provider-reported usage when it contradicts a payload-only body", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			200_000,
 			{ toolText: "seed" },
@@ -1290,14 +1290,14 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("trigger usage-backed overflow");
 		await session.waitForIdle();
 
-		expect(requestedModels[0]).toBe("anthropic/claude-sonnet-4-5");
+		expect(requestedModels[0]).toBe("test/test-model");
 		expect(overflowStarts.length).toBeGreaterThanOrEqual(1);
 		expect(notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"))).toHaveLength(0);
 	});
 
 	it("blocks automatic continuation when a high-occupancy payload rejection has no runnable recovery", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			2_000,
 			{ toolText: "x".repeat(40_000) },
@@ -1319,7 +1319,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
@@ -1327,7 +1327,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 	it("persists the terminal payload 413 when an active goal dead ends", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			2_000,
 			{ toolText: "x".repeat(40_000) },
@@ -1347,7 +1347,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		const terminalErrors = sessionManager
 			.getBranch()
 			.filter(entry => entry.type === "message")
@@ -1362,7 +1362,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 	it("blocks dual-flag bare-413 dead ends even though overflow evidence is present", async () => {
 		const requestedModels: string[] = [];
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			2_000,
 			{ toolText: "x".repeat(40_000) },
@@ -1384,7 +1384,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 		await session.prompt("work on the goal");
 		await session.waitForIdle();
 
-		expect(requestedModels).toEqual(["anthropic/claude-sonnet-4-5"]);
+		expect(requestedModels).toEqual(["test/test-model"]);
 		const payloadNotices = notices.filter(n => n.source === NOTICE_SOURCE && n.message.includes("413"));
 		expect(payloadNotices.length).toBe(1);
 		expect(payloadNotices[0].level).toBe("warning");
@@ -1403,7 +1403,7 @@ describe("AgentSession payload-rejection 413 handling", () => {
 	});
 
 	it("persists a blocked dual-flag 413 outside goal mode", async () => {
-		const primaryMock = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const primaryMock = createMockModel({ id: "test-model", provider: "test" });
 		await createSession(
 			2_000,
 			{ toolText: "x".repeat(40_000) },

@@ -31,7 +31,7 @@ describe("sdk edit-store session reset", () => {
 		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const bundled = createTestModel({ provider: "test", id: "test-model" });
-		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
+		if (!bundled) throw new Error("Expected built-in test model to exist");
 		tempDir = TempDir.createSync("@omp-edit-store-reset-");
 		const settings = Settings.isolated({
 			"async.enabled": false,

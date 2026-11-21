@@ -38,19 +38,19 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 		initTheme();
 		// The slim catalog ships no bundled models, so give the registry a
 		// models.yml defining the model these tests persist and restore
-		// (`openai/gpt-4o-mini`) as a synthetic openai-completions provider.
+		// (`test/test-model`) as a synthetic openai-completions provider.
 		modelsDir = TempDir.createSync("omp-session-modes-models-");
 		await Bun.write(
 			modelsDir.join("models.yml"),
 			JSON.stringify({
 				providers: {
-					openai: {
+					test: {
 						baseUrl: "https://example.invalid/v1",
 						api: "openai-completions",
 						models: [
 							{
-								id: "gpt-4o-mini",
-								name: "gpt-4o-mini",
+								id: "test-model",
+								name: "Test Model",
 								reasoning: false,
 								input: ["text", "image"],
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

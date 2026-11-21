@@ -53,9 +53,9 @@ function modelSlider(index: number): HookSelectorSlider {
 		caption: "continue with",
 		index,
 		segments: [
-			{ label: "smol", detail: "gpt-5-mini" },
-			{ label: "default", detail: "claude-sonnet" },
-			{ label: "slow", detail: "claude-opus" },
+			{ label: "smol", detail: "test-model-a" },
+			{ label: "default", detail: "test-model-b" },
+			{ label: "slow", detail: "test-model-c" },
 		],
 	};
 }
@@ -68,9 +68,9 @@ describe("HookSelectorComponent model slider", () => {
 		expect(text).toContain("default");
 		expect(text).toContain("slow");
 		// Only the active tier's detail is shown beneath the track.
-		expect(text).toContain("claude-sonnet");
-		expect(text).not.toContain("gpt-5-mini");
-		expect(text).not.toContain("claude-opus");
+		expect(text).toContain("test-model-b");
+		expect(text).not.toContain("test-model-a");
+		expect(text).not.toContain("test-model-c");
 	});
 
 	it("advances on right arrow, updating selection and the displayed model name", () => {
@@ -78,8 +78,8 @@ describe("HookSelectorComponent model slider", () => {
 		h.component.handleInput(RIGHT);
 		expect(h.changes).toEqual([2]);
 		const text = h.render();
-		expect(text).toContain("claude-opus");
-		expect(text).not.toContain("claude-sonnet");
+		expect(text).toContain("test-model-c");
+		expect(text).not.toContain("test-model-b");
 	});
 
 	it("moves left and right from any list position without selecting an option", () => {
@@ -87,7 +87,7 @@ describe("HookSelectorComponent model slider", () => {
 		h.component.handleInput(LEFT); // 2 -> 1
 		h.component.handleInput(LEFT); // 1 -> 0
 		expect(h.changes).toEqual([1, 0]);
-		expect(h.render()).toContain("gpt-5-mini");
+		expect(h.render()).toContain("test-model-a");
 		// The slider never triggers option selection or cancellation.
 		expect(h.selected).toEqual([]);
 		expect(h.cancelled).toBe(0);
@@ -142,7 +142,7 @@ describe("HookSelectorComponent model slider", () => {
 		const selected: string[] = [];
 		const component = new HookSelectorComponent(
 			"Choose provider",
-			["Ollama", "Kagi", "OpenCode Go", "Tavily"],
+			["Ollama", "Kagi", "Other Gateway", "Tavily"],
 			option => selected.push(option),
 			() => {},
 			{ maxVisible: 3 },
@@ -155,11 +155,11 @@ describe("HookSelectorComponent model slider", () => {
 			.map(line => Bun.stripANSI(line))
 			.join("\n");
 
-		expect(rendered).toContain("OpenCode Go");
+		expect(rendered).toContain("Other Gateway");
 		expect(rendered).not.toContain("Ollama");
 		expect(rendered).toContain("Search: og");
 
 		component.handleInput("\n");
-		expect(selected).toEqual(["OpenCode Go"]);
+		expect(selected).toEqual(["Other Gateway"]);
 	});
 });

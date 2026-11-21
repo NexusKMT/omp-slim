@@ -39,11 +39,11 @@ const MUSE_DENIAL_RESPONSE: CapturedHttpErrorResponse = {
 };
 
 const dump: RawHttpRequestDump = {
-	provider: "anthropic",
-	api: "anthropic-messages",
-	model: "claude-opus-4-8",
+	provider: "test",
+	api: "openai-completions",
+	model: "test-model",
 	method: "POST",
-	url: "https://api.anthropic.com/v1/messages",
+	url: "https://example.invalid/v1/chat/completions",
 	headers: { "x-api-key": "secret-key", "content-type": "application/json" },
 	body: { messages: [{ role: "user", content: "hi" }] },
 };
@@ -53,8 +53,8 @@ describe("buildHttp400DumpPayload", () => {
 		const message = "400 image exceeds 5 MB limit";
 		const payload = buildHttp400DumpPayload(dump, new HttpError(400, message), message);
 
-		expect(payload.provider).toBe("anthropic");
-		expect(payload.url).toBe("https://api.anthropic.com/v1/messages");
+		expect(payload.provider).toBe("test");
+		expect(payload.url).toBe("https://example.invalid/v1/chat/completions");
 		expect(payload.body).toEqual({ messages: [{ role: "user", content: "hi" }] });
 		expect(payload.errorResponse).toEqual({ status: 400, message });
 	});
@@ -76,10 +76,10 @@ describe("buildHttp400DumpPayload", () => {
 	it("redacts provider-specific auth headers the fixed list never named", () => {
 		const googleDump: RawHttpRequestDump = {
 			provider: "google",
-			api: "google-generative-ai",
-			model: "gemini-2.5-flash",
+			api: "openai-completions",
+			model: "test-model",
 			method: "POST",
-			url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent",
+			url: "https://api.example.invalid/v1beta/models/test-model:streamGenerateContent",
 			headers: {
 				"x-goog-api-key": "AIzaSy-live-google-key",
 				"x-amz-security-token": "aws-session-token",

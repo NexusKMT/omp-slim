@@ -32,9 +32,9 @@ function makeAssistantMessage(overrides: Partial<AssistantMessage> = {}): Assist
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "draft" }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "aborted",
 		usage: {
 			input: 0,

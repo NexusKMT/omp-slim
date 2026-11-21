@@ -67,7 +67,7 @@ describe("createAbortSourceTracker", () => {
 		// the auto-retry transient path.
 		const caller = new AbortController();
 		const tracker = createAbortSourceTracker(caller.signal);
-		const reason = new Error("OpenAI responses stream stalled while waiting for the next event");
+		const reason = new Error("Responses stream stalled while waiting for the next event");
 
 		tracker.abortLocally(reason);
 		caller.abort();
@@ -81,7 +81,7 @@ describe("createAbortSourceTracker", () => {
 		// catch block reads tracker state.
 		const caller = new AbortController();
 		const tracker = createAbortSourceTracker(caller.signal);
-		const reason = new Error("OpenAI responses stream timed out while waiting for the first event");
+		const reason = new Error("Responses stream timed out while waiting for the first event");
 
 		caller.abort();
 		tracker.abortLocally(reason);

@@ -97,9 +97,9 @@ function assistantTurn(content: AssistantMessage["content"]): AgentMessage {
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 1,
 			output: 1,

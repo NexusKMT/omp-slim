@@ -11,7 +11,7 @@ import {
 /**
  * Per-provider fallback overrides on the stream-watchdog helpers.
  *
- * These are the gear that lets `google-gemini-cli` widen its first-event floor
+ * These are the gear that lets the provider CLI widen its first-event floor
  * beyond the 100s global default without forcing every other provider to wait
  * just as long. Tests pin the precedence contract callers depend on:
  * caller option > env var > per-provider fallback > base default.
@@ -62,7 +62,7 @@ describe("getStreamIdleTimeoutMs(fallbackMs)", () => {
 });
 
 describe("getOpenAIStreamIdleTimeoutMs(fallbackMs)", () => {
-	it("returns the per-provider fallback when OpenAI env vars are unset", () => {
+	it("returns the per-provider fallback when provider env vars are unset", () => {
 		expect(getOpenAIStreamIdleTimeoutMs(600_000)).toBe(600_000);
 	});
 
@@ -127,12 +127,12 @@ describe("getOpenAIStreamFirstEventTimeoutMs(idleTimeoutMs, fallbackMs)", () => 
 		expect(getOpenAIStreamFirstEventTimeoutMs(300_000, 0)).toBe(0);
 	});
 
-	it("falls back to the generic first-event env when OpenAI env vars are unset", () => {
+	it("falls back to the generic first-event env when provider env vars are unset", () => {
 		Bun.env.PI_STREAM_FIRST_EVENT_TIMEOUT_MS = "42";
 		expect(getOpenAIStreamFirstEventTimeoutMs(undefined, 300_000)).toBe(42);
 	});
 
-	it("respects PI_STREAM_FIRST_EVENT_TIMEOUT_MS=0 disable when no OpenAI override is set", () => {
+	it("respects PI_STREAM_FIRST_EVENT_TIMEOUT_MS=0 disable when no provider override is set", () => {
 		Bun.env.PI_STREAM_FIRST_EVENT_TIMEOUT_MS = "0";
 		expect(getOpenAIStreamFirstEventTimeoutMs(1500, 100_000)).toBe(0);
 	});

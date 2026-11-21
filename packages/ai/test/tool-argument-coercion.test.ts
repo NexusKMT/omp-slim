@@ -2154,7 +2154,7 @@ describe("Tool argument coercion", () => {
 
 	describe("string|array union (regression: #1788)", () => {
 		// `search` and `gh` tools declare `paths`/`pr` as `union(string, array<string>)`
-		// so the LLM can pass a single path or many. Some providers (Z.AI / GLM)
+		// so the LLM can pass a single path or many. Some providers
 		// double-serialize array tool-call arguments into JSON strings, which the
 		// union accepts as a string — silently feeding the downstream tool a literal
 		// `["a","b"]` path string.

@@ -9,7 +9,7 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import type { EditMode } from "@oh-my-pi/pi-tui/tools/edit";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
-const MODEL = "openai/gpt-5.6";
+const MODEL = "test/test-model";
 const SOURCE = "export function value(): number {\n\treturn 1;\n}\n";
 
 function makeSession(cwd: string, settings: Settings): ToolSession {

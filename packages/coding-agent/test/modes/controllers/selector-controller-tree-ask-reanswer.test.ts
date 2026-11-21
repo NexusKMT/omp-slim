@@ -1,7 +1,7 @@
 /**
  * `/tree`'s interactive selector must let the active leaf's `ask` toolResult
  * fall through to the re-answer flow instead of treating it as a plain
- * "already at this point" no-op (Codex review on #5895, posted as a
+ * "already at this point" no-op (review on #5895, posted as a
  * body-only review comment that predates this fix: the `agent-session.ts`
  * `allowAskReopen` gate is unreachable unless the interactive `/tree`
  * handler itself stops short-circuiting on `entryId === realLeafId` for

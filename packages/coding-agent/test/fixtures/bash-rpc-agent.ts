@@ -15,7 +15,7 @@ const authStorage = await AuthStorage.create(path.join(cwd, "auth.db"));
 const modelRegistry = new ModelRegistry(authStorage, path.join(cwd, "models.yml"));
 const agent = new Agent({
 	initialState: {
-		model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+		model: createTestModel({ provider: "anthropic", id: "test-model" })!,
 		systemPrompt: [],
 		tools: [],
 	},

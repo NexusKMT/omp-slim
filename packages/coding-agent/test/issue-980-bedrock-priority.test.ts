@@ -24,21 +24,21 @@ function model(provider: string, id: string): Model {
 }
 
 describe("issue #980 provider-qualified model resolution", () => {
-	test("prefers the explicit anthropic provider when the exact pair exists", () => {
-		const availableModels = [model("amazon-bedrock", "claude-3-7-sonnet"), model("anthropic", "claude-3-7-sonnet")];
+	test("prefers the explicit provider when the exact pair exists", () => {
+		const availableModels = [model("test-bedrock", "test-model"), model("test", "test-model")];
 		const settings = Settings.isolated({
-			modelRoles: { default: "anthropic/claude-3-7-sonnet" },
+			modelRoles: { default: "test/test-model" },
 		});
 
 		const resolved = resolveModelFromString(settings.getModel()!, availableModels);
-		expect(resolved?.provider).toBe("anthropic");
-		expect(resolved?.id).toBe("claude-3-7-sonnet");
+		expect(resolved?.provider).toBe("test");
+		expect(resolved?.id).toBe("test-model");
 	});
 
-	test("does not silently fall back to bedrock when a provider-qualified role misses", () => {
-		const availableModels = [model("amazon-bedrock", "claude-3-7-sonnet"), model("anthropic", "claude-sonnet-4-5")];
+	test("does not silently fall back to another provider when a provider-qualified role misses", () => {
+		const availableModels = [model("test-bedrock", "test-model"), model("test", "test-model-2")];
 		const settings = Settings.isolated({
-			modelRoles: { default: "anthropic/claude-3-7-sonnet" },
+			modelRoles: { default: "test/test-model" },
 		});
 
 		const roleValue = settings.getModel();
@@ -49,7 +49,7 @@ describe("issue #980 provider-qualified model resolution", () => {
 		expect(settingsResolved).toBeUndefined();
 
 		const cliResolved = resolveCliModel({
-			cliModel: "anthropic/claude-3-7-sonnet",
+			cliModel: "test/test-model",
 			modelRegistry: {
 				getAll: () => availableModels,
 				getAvailable: () => availableModels,
@@ -57,7 +57,7 @@ describe("issue #980 provider-qualified model resolution", () => {
 		});
 		expect(cliResolved.model).toBeUndefined();
 		expect(cliResolved.error).toBe(
-			'Model "anthropic/claude-3-7-sonnet" is not configured. Configure the endpoint baseUrl, apiKey and model id in models.yml.',
+			'Model "test/test-model" is not configured. Configure the endpoint baseUrl, apiKey and model id in models.yml.',
 		);
 	});
 });

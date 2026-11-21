@@ -21,9 +21,9 @@ function msg(id: string, parentId: string | null, role: "user" | "assistant", te
 		message: {
 			role,
 			content: [{ type: "text", text }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-test",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -159,13 +159,13 @@ describe("buildSessionContext", () => {
 		it("tracks model from assistant message", () => {
 			const entries: SessionEntry[] = [msg("1", null, "user", "hello"), msg("2", "1", "assistant", "hi")];
 			const ctx = buildSessionContext(entries);
-			expect(ctx.models.default).toBe("anthropic/claude-test");
+			expect(ctx.models.default).toBe("test/test-model");
 		});
 
 		it("tracks model from model change entry", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "hello"),
-				modelChange("2", "1", "openai", "gpt-4"),
+				modelChange("2", "1", "test", "test-model-2"),
 				msg("3", "2", "assistant", "hi"),
 			];
 			const ctx = buildSessionContext(entries);
@@ -173,7 +173,7 @@ describe("buildSessionContext", () => {
 			// be silently overwritten by a later assistant message tagged with a
 			// different model id. Temporary fallbacks and provider-side
 			// downgrades both produce such mismatched messages.
-			expect(ctx.models.default).toBe("openai/gpt-4");
+			expect(ctx.models.default).toBe("test/test-model-2");
 		});
 	});
 
@@ -199,7 +199,7 @@ describe("buildSessionContext", () => {
 			expect((ctx.messages[4] as any).content[0].text).toBe("response3");
 		});
 
-		it("keeps Anthropic native web-search bytes when compaction retains the assistant turn", () => {
+		it("keeps native web-search bytes when compaction retains the assistant turn", () => {
 			const nativeContent: AssistantMessage["content"] = [
 				{ type: "thinking", thinking: "search", thinkingSignature: "sig-1" },
 				{
@@ -269,15 +269,15 @@ describe("buildSessionContext", () => {
 			expect((ctx.messages[0] as any).summary).toContain("Empty summary");
 		});
 
-		it("keeps a native Anthropic compaction summary ahead of its retained assistant turn", () => {
+		it("keeps a native compaction summary ahead of its retained assistant turn", () => {
 			const nativeCompaction: CompactionEntry = {
 				...compaction("3", "2", "Native summary", "2"),
 				preserveData: {
 					anthropicCompaction: {
-						provider: "anthropic",
+						provider: "test",
 						content: "Native summary",
 						signature: "sig_state",
-						model: "claude-fable-5",
+						model: "test-model-3",
 					},
 				},
 			};
@@ -302,7 +302,7 @@ describe("buildSessionContext", () => {
 				...compaction("3", "2", "Snapshot summary", ""),
 				providerReplayThroughEntryId: "1",
 				preserveData: {
-					anthropicCompaction: { provider: "anthropic", content: "Snapshot summary", signature: "sig" },
+					anthropicCompaction: { provider: "test", content: "Snapshot summary", signature: "sig" },
 				},
 			};
 			const ctx = buildSessionContext([snapshot, newTurn, compactionEntry]);
@@ -311,7 +311,7 @@ describe("buildSessionContext", () => {
 			expect(ctx.messages[0].summary).toBe("Snapshot summary");
 		});
 
-		it("prepends context notes ahead of a native Anthropic summary", () => {
+		it("prepends context notes ahead of a native summary", () => {
 			const notes: SessionEntry = {
 				type: "custom",
 				customType: "experimental_context_notes",
@@ -323,7 +323,7 @@ describe("buildSessionContext", () => {
 			const nativeCompaction: CompactionEntry = {
 				...compaction("3", "2", "Native summary", ""),
 				preserveData: {
-					anthropicCompaction: { provider: "anthropic", content: "Native summary", signature: "sig" },
+					anthropicCompaction: { provider: "test", content: "Native summary", signature: "sig" },
 				},
 			};
 			const ctx = buildSessionContext([
@@ -365,7 +365,7 @@ describe("buildSessionContext", () => {
 			const nativeCompaction: CompactionEntry = {
 				...compaction("5", "4", "Native summary", "3"),
 				preserveData: {
-					anthropicCompaction: { provider: "anthropic", content: "Native summary", signature: "sig" },
+					anthropicCompaction: { provider: "test", content: "Native summary", signature: "sig" },
 				},
 			};
 			const ctx = buildSessionContext([
@@ -399,9 +399,9 @@ describe("buildSessionContext", () => {
 						{ type: "thinking", thinking: "kept reasoning", thinkingSignature: "sig" },
 						{ type: "text", text: "response" },
 					],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-fable-5-1",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model-4",
 					usage: {
 						input: 1,
 						output: 1,
@@ -420,10 +420,10 @@ describe("buildSessionContext", () => {
 				timestamp: "2025-06-01T00:00:00Z",
 				preserveData: {
 					anthropicCompaction: {
-						provider: "anthropic",
+						provider: "test",
 						content: "Native summary",
 						signature: "sig_state",
-						model: "claude-fable-5",
+						model: "test-model-3",
 					},
 				},
 			};
@@ -733,9 +733,9 @@ describe("buildSessionContext", () => {
 						{ type: "text", text: "Delegating to a subagent." },
 						{ type: "toolCall", id: "call_spawn", name: "task", arguments: { task: "map the repo" } },
 					],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-test",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					usage: {
 						input: 1,
 						output: 1,
@@ -856,7 +856,7 @@ describe("buildSessionContext", () => {
 			const entries: SessionEntry[] = [
 				msg("1", null, "user", "old request"),
 				msg("2", "1", "assistant", "first orphan assistant"),
-				modelChange("3", "2", "anthropic", "claude-test"),
+				modelChange("3", "2", "test", "test-model"),
 				msg("4", "3", "assistant", "assistant after the reset"),
 				msg("5", "4", "user", "first visible question"),
 				msg("6", "5", "assistant", "first visible answer"),
@@ -1046,9 +1046,9 @@ describe("buildSessionContext", () => {
 						{ type: "redactedThinking", data: "encrypted" },
 						{ type: "toolCall", id: "call_2", name: "bash", arguments: { command: "pytest" } },
 					],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-test",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					usage: {
 						input: 1,
 						output: 1,
@@ -1072,7 +1072,7 @@ describe("buildSessionContext", () => {
 			// redacted_thinking dropped (encrypted; cannot be downgraded, would trip immutability).
 			expect(content.some(block => block.type === "redactedThinking")).toBe(false);
 			// thinking preserved but de-signed so the encoder downgrades it to plain text on the wire
-			// (a *modified* latest turn carrying signed thinking is rejected by Anthropic).
+			// (a *modified* latest turn carrying signed thinking is rejected by the provider).
 			const thinking = content.filter(block => block.type === "thinking");
 			expect(thinking.length).toBeGreaterThan(0);
 			expect(thinking.every(block => block.thinkingSignature === undefined)).toBe(true);
@@ -1089,9 +1089,9 @@ describe("buildSessionContext", () => {
 				message: {
 					role: "assistant",
 					content: [{ type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } }],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-test",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					usage: {
 						input: 1,
 						output: 1,
@@ -1132,9 +1132,9 @@ describe("buildSessionContext", () => {
 					message: {
 						role: "assistant",
 						content,
-						api: "anthropic-messages",
-						provider: "anthropic",
-						model: "claude-test",
+						api: "openai-completions",
+						provider: "test",
+						model: "test-model",
 						usage,
 						stopReason,
 						timestamp: 1,

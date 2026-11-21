@@ -108,7 +108,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 	}> {
 		const observedContexts: string[][] = [];
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+		if (!model) throw new Error("Expected test-model model to exist");
 
 		const modelRegistry = sharedModelRegistry;
 		const parentSettings = Settings.isolated({
@@ -159,9 +159,9 @@ describe("AgentSession mid-run threshold compaction", () => {
 									arguments: { cmd: "pwd" },
 								},
 							],
-							api: "anthropic-messages" as const,
-							provider: "anthropic" as const,
-							model: "claude-sonnet-4-5",
+							api: "openai-completions" as const,
+							provider: "test" as const,
+							model: "test-model",
 							usage: highUsage(50_000),
 							stopReason: "toolUse" as const,
 							timestamp: Date.now(),
@@ -169,9 +169,9 @@ describe("AgentSession mid-run threshold compaction", () => {
 					: {
 							role: "assistant" as const,
 							content: [{ type: "text" as const, text: "All done." }],
-							api: "anthropic-messages" as const,
-							provider: "anthropic" as const,
-							model: "claude-sonnet-4-5",
+							api: "openai-completions" as const,
+							provider: "test" as const,
+							model: "test-model",
 							usage: highUsage(200),
 							stopReason: "stop" as const,
 							timestamp: Date.now(),
@@ -639,9 +639,9 @@ describe("AgentSession mid-run threshold compaction", () => {
 						text: `Filler reply ${filler} padding padding padding padding padding padding`,
 					},
 				],
-				api: "anthropic-messages" as const,
-				provider: "anthropic" as const,
-				model: "claude-sonnet-4-5",
+				api: "openai-completions" as const,
+				provider: "test" as const,
+				model: "test-model",
 				stopReason: "stop" as const,
 				usage: highUsage(100),
 				timestamp,

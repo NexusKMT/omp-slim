@@ -47,9 +47,9 @@ export const modelEval: JobWidgetView = {
 			label: "tests passed",
 			max: 30,
 			items: [
-				{ label: "opus-4.5", value: 26, text: "26/30", tone: "success" },
-				{ label: "gpt-5.1", value: 24, text: "24/30" },
-				{ label: "gemini-3-pro", value: 21, text: "21/30", tone: "warning" },
+				{ label: "test-model", value: 26, text: "26/30", tone: "success" },
+				{ label: "test-model-2", value: 24, text: "24/30" },
+				{ label: "test-model-3", value: 21, text: "21/30", tone: "warning" },
 			],
 		},
 	],

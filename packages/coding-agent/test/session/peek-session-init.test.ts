@@ -29,7 +29,7 @@ class LargeFileSessionStorage extends FileSessionStorage {
 
 function assistantMessage(text: string) {
 	const model = createTestModel({ provider: "test", id: "test-model" });
-	if (!model) throw new Error("Expected built-in anthropic model to exist");
+	if (!model) throw new Error("Expected built-in test model to exist");
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text }],

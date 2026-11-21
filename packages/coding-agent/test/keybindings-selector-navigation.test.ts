@@ -173,8 +173,8 @@ describe("selector navigation keybindings", () => {
 		const assistant = createAgentMessageNode("assistant", "first-user", {
 			role: "assistant",
 			content: [{ type: "text", text: "Working on it" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: "test",
 			usage: {
 				input: 0,

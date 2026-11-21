@@ -25,9 +25,9 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage,
 		stopReason: "stop",
 		timestamp: Date.now(),

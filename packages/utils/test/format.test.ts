@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { formatDuration } from "@oh-my-pi/pi-utils/format";
 
 describe("formatDuration", () => {
-	// Codex's wham/usage endpoint returns the prior window's reset_at until the
+	// The wham/usage endpoint returns the prior window's reset_at until the
 	// next request opens a fresh window, so the `resetsAt - now` delta can land
 	// in the recent past. The util must defend against that — older builds
 	// rendered "-612090ms", which leaked straight into the /usage TUI.

@@ -29,7 +29,7 @@ describe("AgentSession idle custom message render", () => {
 	});
 
 	function createSession(): { session: AgentSession; streamCalls: () => number } {
-		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "test-model" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		let streamCallCount = 0;
 		const agent = new Agent({

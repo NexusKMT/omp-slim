@@ -66,7 +66,7 @@ function makeModel(
 		id: overrides.id ?? "test-model",
 		name: "Test Model",
 		api: overrides.api ?? "openai-completions",
-		provider: overrides.provider ?? "anthropic",
+		provider: overrides.provider ?? "test",
 		baseUrl: overrides.baseUrl ?? "https://example.invalid",
 		reasoning: false,
 		input: overrides.input ?? ["text", "image"],
@@ -115,14 +115,14 @@ describe("SnapcompactInlineTransformer", () => {
 		expect(await transformer.transform(context, makeModel({ input: ["text"] }))).toBe(context);
 	});
 
-	it("treats Copilot business/enterprise endpoints as vision-capable when the model input includes image", async () => {
+	it("treats business/enterprise endpoints as vision-capable when the model input includes image", async () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "all", renderToolResults: true }),
 		);
-		for (const baseUrl of ["https://api.business.githubcopilot.com", "https://copilot-api.ghe.example.com"]) {
+		for (const baseUrl of ["https://api.business.example.invalid", "https://enterprise-api.example.invalid"]) {
 			const context = makeContext();
 			const model = makeModel({
-				provider: "github-copilot",
+				provider: "test",
 				baseUrl,
 				input: ["text", "image"],
 			});
@@ -195,7 +195,7 @@ describe("SnapcompactInlineTransformer", () => {
 			messages: [userMessage("go"), toolResult("read-1", raw, "read")],
 		};
 		const options = withTestShape({ renderSystemPrompt: "none", renderToolResults: true });
-		const model = makeModel({ id: "claude-opus-5-5" });
+		const model = makeModel({ id: "test-model" });
 		const spy = spyOn(snapcompact, "renderMany");
 		try {
 			const result = await new SnapcompactInlineTransformer(options).transform(context, model);
@@ -254,7 +254,7 @@ describe("SnapcompactInlineTransformer", () => {
 		try {
 			await new SnapcompactInlineTransformer(
 				withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
-			).transform(context, makeModel({ id: "claude-opus-5-5" }));
+			).transform(context, makeModel({ id: "test-model" }));
 			const rendered = spy.mock.calls[0][0];
 			expect(rendered.startsWith("200:  OK\n404:  Not found\nresponses:\n[·2]w")).toBe(true);
 			expect(rendered.endsWith("\n[0]500|[·4]literal")).toBe(true);
@@ -279,7 +279,7 @@ describe("SnapcompactInlineTransformer", () => {
 		try {
 			await new SnapcompactInlineTransformer(
 				withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
-			).transform(context, makeModel({ id: "claude-opus-5-5" }));
+			).transform(context, makeModel({ id: "test-model" }));
 			const rendered = spy.mock.calls[0][0];
 			expect(rendered.startsWith(`${notice}\n1|[»2]w`)).toBe(true);
 			expect(rendered).toContain(`\n${line}-${line + 30}|[»1]collapsed() { … }`);
@@ -315,7 +315,7 @@ describe("SnapcompactInlineTransformer", () => {
 		try {
 			const result = await new SnapcompactInlineTransformer(
 				withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
-			).transform(context, makeModel({ id: "claude-opus-5-5" }));
+			).transform(context, makeModel({ id: "test-model" }));
 			const [oneRow, rawRows, ...rest] = spy.mock.calls.map(call => call[0]);
 			expect(oneRow.startsWith("42|[·4]w")).toBe(true);
 			expect(rawRows.startsWith("[file.ts#ABCD]\n1:  w")).toBe(true);
@@ -414,7 +414,7 @@ describe("SnapcompactInlineTransformer", () => {
 			data: "dG9vbC1pbWFnZS1ieXRlcw==",
 			mimeType: "image/webp",
 			detail: "original",
-			providerFile: { provider: "anthropic", id: "file_tool_source" },
+		providerFile: { provider: "anthropic", id: "file_tool_source" },
 			url: "https://images.example.invalid/tool-source.webp",
 		};
 		const secondToolImage: ImageContent = {
@@ -602,7 +602,7 @@ describe("SnapcompactInlineTransformer", () => {
 		};
 		// Unknown provider → default budget 5. Each LARGE needs 2 frames:
 		// call_1 (2) + call_2 (2) fit, call_3 needs 2 > 1 remaining → text.
-		const result = await transformer.transform(context, makeModel({ provider: "groq" }));
+		const result = await transformer.transform(context, makeModel({ provider: "test-alt" }));
 		expect(imageCount(result)).toBeLessThanOrEqual(5);
 		expect(result.messages[3]).toBe(context.messages[3]);
 		expect(result.messages[4]).toBe(context.messages[4]);
@@ -631,7 +631,7 @@ describe("SnapcompactInlineTransformer", () => {
 				toolResult("call_newest", LARGE),
 			],
 		};
-		const model = makeModel({ provider: "groq" });
+		const model = makeModel({ provider: "test-alt" });
 		const estimate = estimateInlineSavings({
 			options,
 			model,
@@ -681,7 +681,7 @@ describe("SnapcompactInlineTransformer", () => {
 		const transformer = new SnapcompactInlineTransformer(
 			withTestShape({ renderSystemPrompt: "none", renderToolResults: true }),
 		);
-		const model = makeModel({ provider: "groq" });
+		const model = makeModel({ provider: "test-alt" });
 		const thinkingTurn = (text: string, timestamp: number): AssistantMessage => ({
 			...createAssistantMessage(text),
 			content: [
@@ -715,7 +715,7 @@ describe("SnapcompactInlineTransformer", () => {
 	});
 
 	describe("successive cap crossings", () => {
-		const model = makeModel({ provider: "groq" });
+		const model = makeModel({ provider: "test-alt" });
 		const screenshot: ImageContent = { type: "image", data: "c2NyZWVuc2hvdA==", mimeType: "image/png" };
 		const paste = (timestamp: number): Message => ({ role: "user", content: [screenshot, screenshot], timestamp });
 		const thinkingTurn = (timestamp: number): AssistantMessage => ({
@@ -788,7 +788,7 @@ describe("SnapcompactInlineTransformer", () => {
 	it("never changes how an already-sent message goes out as the conversation grows", async () => {
 		// Every request must start with the previous request's exact bytes.
 		// Rewriting an earlier item voids the provider prompt cache from there
-		// on and invalidates later signed thinking (Anthropic prefix binding).
+		// on and invalidates later signed thinking (prefix binding).
 		const options = withTestShape({ renderSystemPrompt: "all", renderToolResults: true });
 		const screenshot: ImageContent = { type: "image", data: "c2NyZWVuc2hvdA==", mimeType: "image/png" };
 		const turns: Message[][] = [
@@ -801,9 +801,9 @@ describe("SnapcompactInlineTransformer", () => {
 				{ role: "user", content: [{ type: "text", text: "see this" }, screenshot], timestamp: 0 },
 			],
 		];
-		// Anthropic's 90-image cap never binds; the 5-image fallback cap makes
+		// The 90-image cap never binds; the 5-image fallback cap makes
 		// the system prompt and tool results compete for frames.
-		for (const model of [makeModel(), makeModel({ provider: "groq" })]) {
+		for (const model of [makeModel(), makeModel({ provider: "test-alt" })]) {
 			const transformer = new SnapcompactInlineTransformer(options);
 			const history: Message[] = [userMessage("start")];
 			let previous: Context | undefined;

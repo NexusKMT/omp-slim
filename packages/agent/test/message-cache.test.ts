@@ -37,8 +37,8 @@ function settledAssistant(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "bench",
 		usage: usage(120),
 		stopReason: "stop",

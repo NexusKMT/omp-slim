@@ -4,7 +4,7 @@ import { OAuthManualInputManager } from "@oh-my-pi/pi-coding-agent/modes/oauth-m
 describe("OAuthManualInputManager", () => {
 	it("resolves waitForInput with submitted value", async () => {
 		const manager = new OAuthManualInputManager();
-		const promise = manager.waitForInput("openai-codex");
+		const promise = manager.waitForInput("test");
 
 		const submitted = manager.submit("callback-url");
 
@@ -15,10 +15,10 @@ describe("OAuthManualInputManager", () => {
 
 	it("does not replace pending input when using tryWaitForInput", async () => {
 		const manager = new OAuthManualInputManager();
-		const first = manager.waitForInput("openai-codex");
+		const first = manager.waitForInput("test");
 
 		expect(manager.tryWaitForInput("mcp")).toBeUndefined();
-		expect(manager.pendingProviderId).toBe("openai-codex");
+		expect(manager.pendingProviderId).toBe("test");
 
 		expect(manager.submit("callback-url")).toBe(true);
 		expect(await first).toBe("callback-url");
@@ -32,7 +32,7 @@ describe("OAuthManualInputManager", () => {
 
 	it("clears pending input and rejects promise", async () => {
 		const manager = new OAuthManualInputManager();
-		const promise = manager.waitForInput("anthropic");
+		const promise = manager.waitForInput("test");
 
 		manager.clear();
 

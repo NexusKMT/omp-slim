@@ -156,7 +156,7 @@ describe("AgentSession streaming edit preview recovery", () => {
 			// only consumes the AgentTool surface.
 			const agentEditTool = editTool as AgentTool;
 
-			const model = createMockModel({ provider: "test", id: "claude-streaming-edit-recovery" }).model;
+			const model = createMockModel({ provider: "test", id: "test-model" }).model;
 			settings.setModel(`${model.provider}/${model.id}`);
 			const contexts: Context[] = [];
 			let call = 0;

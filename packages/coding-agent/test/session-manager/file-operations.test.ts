@@ -277,9 +277,9 @@ describe("SessionManager legacy session migration persistence", () => {
 		return {
 			role: "assistant" as const,
 			content: [{ type: "text" as const, text: "legacy reply" }],
-			api: "anthropic-messages" as const,
-			provider: "anthropic" as const,
-			model: "claude-sonnet-4-20250514",
+			api: "openai-completions" as const,
+			provider: "test" as const,
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,

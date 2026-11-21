@@ -3,7 +3,7 @@ import { type } from "@oh-my-pi/omptype";
 import type { Tool } from "@oh-my-pi/pi-ai/types";
 import { validateToolArguments } from "@oh-my-pi/pi-ai/utils/validation";
 
-// Issue #8886 — some providers (notably Gemini) serialize array arguments as
+// Issue #8886 — some providers serialize array arguments as
 // flattened property paths (`questions[0].id`) instead of a nested array.
 
 // Mirrors the shape of OMP's `ask` tool (`packages/coding-agent/src/tools/ask.ts`).

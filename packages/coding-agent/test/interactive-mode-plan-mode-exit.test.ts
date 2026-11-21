@@ -45,7 +45,7 @@ describe("InteractiveMode plan mode exit", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		// prompt() preflights credentials via modelRegistry.getApiKey; the in-memory
-		// auth storage has no anthropic key, so stub it.
+		// auth storage has no test key, so stub it.
 		vi.spyOn(modelRegistry, "getApiKey").mockResolvedValue("test-key");
 		streamFn = undefined;
 		session = new AgentSession({

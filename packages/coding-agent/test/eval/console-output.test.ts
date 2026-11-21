@@ -124,7 +124,7 @@ describe("JS console output", () => {
 	});
 
 	it("prints records whose image data is unusable as plain text", () => {
-		// Padding mid-string is not strict base64; the Anthropic API rejects it.
+		// Padding mid-string is not strict base64; the API rejects it.
 		for (const data of [{ not: "a buffer" }, "abcd=efg"]) {
 			const { hooks, displays, texts } = collect();
 			runtime.echo({ type: "image", data, mimeType: "image/png" }, hooks);

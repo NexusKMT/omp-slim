@@ -10,7 +10,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("--service-tier", () => {
-	it("parses supported OpenAI tiers without leaking the value into the prompt", () => {
+	it("parses supported service tiers without leaking the value into the prompt", () => {
 		const parsed = parseArgs(["--service-tier=flex", "hello"]);
 
 		expect(parsed.serviceTier).toBe("flex");
@@ -23,7 +23,7 @@ describe("--service-tier", () => {
 		);
 	});
 
-	it("maps none to an explicit OpenAI service-tier omission", async () => {
+	it("maps none to an explicit service-tier omission", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		try {
 			const options = await buildSessionOptions(
@@ -40,7 +40,7 @@ describe("--service-tier", () => {
 		}
 	});
 
-	it("applies the OpenAI override in the live session", async () => {
+	it("applies the service-tier override in the live session", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		const sessionManager = SessionManager.inMemory();
 		try {
@@ -69,7 +69,7 @@ describe("--service-tier", () => {
 		}
 	});
 
-	it("persists a resumed OpenAI override", async () => {
+	it("persists a resumed service-tier override", async () => {
 		using tempDir = TempDir.createSync("@omp-service-tier-resume-");
 		const authStorage = await AuthStorage.create(":memory:");
 		const sessionFile = path.join(tempDir.path(), "session.jsonl");

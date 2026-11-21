@@ -423,7 +423,7 @@ describe("AgentSession session stats", () => {
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
-				upstreamModel: "claude-opus-4-6",
+				upstreamModel: "test-model",
 				usage: { ...usage, credits: { cost: 2.5, committedCost: 2, acuCost: 0.25 } },
 				stopReason: "stop",
 				timestamp: 1,
@@ -434,7 +434,7 @@ describe("AgentSession session stats", () => {
 				api: model.api,
 				provider: model.provider,
 				model: model.id,
-				upstreamModel: "claude-opus-4-6",
+				upstreamModel: "test-model",
 				usage: { ...usage, credits: { cost: 1.5, committedCost: 1, acuCost: 0.75 } },
 				stopReason: "stop",
 				timestamp: 2,
@@ -464,7 +464,7 @@ describe("AgentSession session stats", () => {
 		const stats = session.getSessionStats();
 		expect(stats.credits).toEqual({ cost: 4, committedCost: 3, acuCost: 1 });
 		expect(stats.routedModels).toEqual({
-			"claude-opus-4-6": 2,
+			"test-model": 2,
 			"swe-1-7-medium": 1,
 		});
 	});

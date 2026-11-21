@@ -13,8 +13,8 @@ function msg(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "m",
 		usage: {
 			input: 0,

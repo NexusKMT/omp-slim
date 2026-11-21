@@ -56,7 +56,7 @@ async function createHarness(modelRegistry: ModelRegistry, options: HarnessOptio
 		// 20k window the cut keeps both tiny messages, leaving nothing for
 		// snapcompact's renderability preflight to scan.
 		"compaction.keepRecentTokens": 1,
-		modelRoles: { vision: "aimlapi/claude-sonnet-4-5-20250929" },
+		modelRoles: { vision: "test/test-model" },
 	});
 	const session = new AgentSession({
 		agent,
@@ -92,8 +92,8 @@ async function createHarness(modelRegistry: ModelRegistry, options: HarnessOptio
 		// NOT the overflow recovery path (which drops the just-ended turn before
 		// snapcompact's renderability preflight can scan it, leaving nothing to
 		// summarize). Derived from the live window so the fixture survives model
-		// metadata changes (claude-sonnet-4-5's 200k window is narrower than the
-		// vision-role qwen's, so a fixed count would overflow one of them).
+		// metadata changes (test-model's 200k window is narrower than the
+		// vision-role model's, so a fixed count would overflow one of them).
 		const contextWindow = activeModel.contextWindow ?? 0;
 		const thresholdTokens = compactionModule.resolveThresholdTokens(contextWindow, cfgCompaction.get(settings));
 		const promptTokens = contextWindow > 0 ? Math.floor((thresholdTokens + contextWindow) / 2) : 246_000;
@@ -128,7 +128,7 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("aimlapi", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		authStorage.keys.setRuntime("test", "test-key");
 		authStorage.keys.setRuntime("test", "test-key");
 		authStorage.keys.setRuntime("test", "test-key");
@@ -145,9 +145,9 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 		authStorage.close();
 	});
 
-	it("uses snapcompact for a non-OpenAI vision model under the default preference order", async () => {
+	it("uses snapcompact for a non-test vision model under the default preference order", async () => {
 		const harness = await createHarness(modelRegistry, {
-			activeModel: { provider: "aimlapi", id: "claude-sonnet-4-5-20250929" },
+			activeModel: { provider: "test", id: "test-model" },
 			methodOrder: null,
 		});
 		session = harness.session;
@@ -162,7 +162,7 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 
 	it("downgrades to context-full when unsupported glyphs make snapcompact unsafe", async () => {
 		const harness = await createHarness(modelRegistry, {
-			activeModel: { provider: "aimlapi", id: "claude-sonnet-4-5-20250929" },
+			activeModel: { provider: "test", id: "test-model" },
 			seedMessages: [
 				{
 					role: "user",

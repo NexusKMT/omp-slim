@@ -95,7 +95,7 @@ describe("eval prelude runtime", () => {
 			expect(result.details?.cells?.[0]?.status).toBe("complete");
 			expect(calls).toHaveLength(1);
 			const model = createTestModel({ provider: "test", id: "model" });
-			if (!model) throw new Error("Missing bundled OpenAI model");
+			if (!model) throw new Error("Missing bundled test model");
 			const messages: Message[] = [
 				{
 					role: "toolResult",

@@ -82,7 +82,7 @@ describe("task wire schema", () => {
 
 	it("deletes model arrays on the flat shape instead of rejecting", () => {
 		const schema = getTaskSchema({ isolationEnabled: false, batchEnabled: false, effortEnabled: true });
-		const parsed = schema({ task: "x", solutionSpace: "c", model: ["openai/gpt-5.4"] });
+		const parsed = schema({ task: "x", solutionSpace: "c", model: ["test/test-model"] });
 		expect(parsed instanceof type.errors).toBe(false);
 		if (!(parsed instanceof type.errors)) {
 			expect("model" in (parsed as Record<string, unknown>)).toBe(false);

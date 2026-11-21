@@ -50,9 +50,9 @@ const TOKENIZER_REPLY =
 describe("AgentSession title generation disposal", () => {
 	it("isolates the title provider session and aborts it during disposal", async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		const model = createMockModel({ id: "test-model", provider: "test" });
 		const providerSessionId = "provider-session";
 
 		const settings = Settings.isolated({
@@ -93,7 +93,7 @@ describe("AgentSession title generation disposal", () => {
 		expect(titleSessionId).toBeTruthy();
 		expect(titleSessionId).not.toBe(providerSessionId);
 		expect(resolver.mock.calls[0]?.[1]).toBe(titleSessionId);
-		expect(titleProvider).toBe("anthropic");
+		expect(titleProvider).toBe("test");
 		session.beginDispose();
 
 		expect(requestSignal?.aborted).toBe(true);
@@ -102,8 +102,8 @@ describe("AgentSession title generation disposal", () => {
 
 	it("does not start a second auto-title request while the first is still in flight", async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const model = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		authStorage.keys.setRuntime("test", "test-key");
+		const model = createMockModel({ id: "test-model", provider: "test" });
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
@@ -140,8 +140,8 @@ describe("AgentSession title generation disposal", () => {
 
 	it("lets a replacement session title itself and ignores the previous request", async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const model = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		authStorage.keys.setRuntime("test", "test-key");
+		const model = createMockModel({ id: "test-model", provider: "test" });
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
@@ -202,8 +202,8 @@ describe("AgentSession title generation disposal", () => {
 
 	it("retitles from the assistant reply when the title model declines an ambiguous first message", async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const model = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		authStorage.keys.setRuntime("test", "test-key");
+		const model = createMockModel({ id: "test-model", provider: "test" });
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,
@@ -244,8 +244,8 @@ describe("AgentSession title generation disposal", () => {
 
 	it("skips the title model for attachment-only requests and titles from the assistant reply", async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const model = createMockModel({ id: "claude-sonnet-4-5", provider: "anthropic" });
+		authStorage.keys.setRuntime("test", "test-key");
+		const model = createMockModel({ id: "test-model", provider: "test" });
 
 		const settings = Settings.isolated({
 			"compaction.enabled": false,

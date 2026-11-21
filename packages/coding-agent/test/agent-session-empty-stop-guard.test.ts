@@ -664,15 +664,15 @@ describe("AgentSession empty stop guard", () => {
 		expect(reminderMessages(session.agent.state.messages)).toHaveLength(1);
 	});
 
-	it("preserves Codex commentary when discarding a colliding empty final stop", async () => {
+	it("preserves provider commentary when discarding a colliding empty final stop", async () => {
 		const timestamp = 1_725_287_000_000;
 		vi.spyOn(Date, "now").mockReturnValue(timestamp);
-		const commentary = "Codex commentary before the empty final answer.";
+		const commentary = "provider commentary before the empty final answer.";
 		const recovered = "Recovered after the empty final-answer retry.";
 		const { session, mock } = await createHarness(
 			[{ content: [commentary], stopReason: "stop" }, emptyStop(), { content: [recovered], stopReason: "stop" }],
 			{},
-			{ provider: "openai-codex", id: "gpt-5.5-codex" },
+			{ provider: "test", id: "test-model" },
 		);
 
 		await session.prompt("produce commentary");

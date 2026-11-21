@@ -418,7 +418,7 @@ describe("Agent hub Enter activation", () => {
 					id: "model",
 					parentId: null,
 					timestamp: createdAt,
-					model: "openai-codex/gpt-5.6-luna",
+					model: "test/test-model",
 					// Historical concrete overrides did not persist a model-role field.
 				}),
 				JSON.stringify({
@@ -469,7 +469,7 @@ describe("Agent hub Enter activation", () => {
 		await hub.persistedSubagentsReady;
 
 		const workerEntry = renderedRosterEntry(hub, "Worker", 120).replace(/\s+/g, " ");
-		expect(workerEntry).toContain("gpt-5.6-luna");
+		expect(workerEntry).toContain("test-model");
 		expect(workerEntry).toContain("$0.123");
 		expect(workerEntry).toContain("1m30s");
 		expect(workerEntry).toContain("1 req");

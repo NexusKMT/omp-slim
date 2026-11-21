@@ -344,7 +344,7 @@ describe("focused view of a worker-homed agent session", () => {
 		});
 		const render = (): string => stripVTControlCharacters(statusLine.getTopBorder(160).content);
 		const before = render();
-		expect(before).toContain("claude-sonnet-4-5");
+		expect(before).toContain("test-model");
 		const selectors = remote.getAvailableEffortSelectors();
 		const expected = selectors[selectors.indexOf(ThinkingLevel.Low) + 1];
 		const next = remote.cycleThinkingLevel();

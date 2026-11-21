@@ -12,7 +12,7 @@ describe("ModelsConfigSchema tokenizer", () => {
 				p: {
 					baseUrl,
 					apiKey: "K",
-					models: [{ id: "legacy-gpt-4", api: "openai-completions" as const, tokenizer }],
+					models: [{ id: "legacy-test-model", api: "openai-completions" as const, tokenizer }],
 				},
 			},
 		});

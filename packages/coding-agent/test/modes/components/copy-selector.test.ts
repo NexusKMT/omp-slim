@@ -38,9 +38,9 @@ function makeEntries(assistantText = ASSISTANT_TEXT): SessionMessageEntry[] {
 				{ type: "text", text: assistantText },
 				{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "bun test" } },
 			],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "stop",
 			usage: {
 				input: 10,
@@ -82,9 +82,9 @@ function makeGroupedReadEntries(): SessionMessageEntry[] {
 				{ type: "toolCall", id: "read-a", name: "read", arguments: { path: "/tmp/a.ts" } },
 				{ type: "toolCall", id: "read-b", name: "read", arguments: { path: "/tmp/b.ts" } },
 			],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "stop",
 			usage: {
 				input: 10,
@@ -513,9 +513,9 @@ describe("CopySelectorComponent", () => {
 				entry(`a${index}`, entries.at(-1)!.id, {
 					role: "assistant",
 					content: [{ type: "toolCall", id: call, name: "bash", arguments: { command: `step ${index}` } }],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-sonnet-4-5",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					stopReason: "toolUse",
 					usage: {
 						input: 1,

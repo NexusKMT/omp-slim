@@ -60,7 +60,7 @@ describe("config CLI schema coverage", () => {
 		await runConfigCommand({
 			action: "set",
 			key: "providers.maxInFlightRequests",
-			value: '{"openai":2.8,"anthropic":1}',
+			value: '{"test-a":2.8,"test-b":1}',
 			flags: { json: true },
 		});
 		await runConfigCommand({ action: "get", key: "providers.maxInFlightRequests", flags: { json: true } });
@@ -70,7 +70,7 @@ describe("config CLI schema coverage", () => {
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
 		expect(parsed.key).toBe("providers.maxInFlightRequests");
 		expect(parsed.type).toBe("record");
-		expect(parsed.value).toEqual({ openai: 2, anthropic: 1 });
+		expect(parsed.value).toEqual({ "test-a": 2, "test-b": 1 });
 	});
 
 	it("rejects invalid provider in-flight request limit entries", async () => {
@@ -84,19 +84,19 @@ describe("config CLI schema coverage", () => {
 			runConfigCommand({
 				action: "set",
 				key: "providers.maxInFlightRequests",
-				value: '{"openai":"2","anthropic":0}',
+				value: '{"test-a":"2","test-b":0}',
 				flags: { json: true },
 			}),
 		).rejects.toThrow("process.exit");
 		expect(exitSpy).toHaveBeenCalledWith(1);
 		expect(console.error).toHaveBeenCalledWith(
-			expect.stringContaining("Provider request limits must be positive numbers: openai, anthropic"),
+			expect.stringContaining("Provider request limits must be positive numbers: test-a, test-b"),
 		);
 	});
 
 	it("sets and gets array settings as JSON arrays", async () => {
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		const arrayValue = '["claude-opus-4-6","gpt-5.3-codex"]';
+		const arrayValue = '["test-model-1","test-model-2"]';
 
 		await runConfigCommand({ action: "set", key: "enabledModels", value: arrayValue, flags: { json: true } });
 		await runConfigCommand({ action: "get", key: "enabledModels", flags: { json: true } });
@@ -106,7 +106,7 @@ describe("config CLI schema coverage", () => {
 		const parsed = JSON.parse(String(payload)) as { key: string; value: unknown; type: string };
 		expect(parsed.key).toBe("enabledModels");
 		expect(parsed.type).toBe("array");
-		expect(parsed.value).toEqual(["claude-opus-4-6", "gpt-5.3-codex"]);
+		expect(parsed.value).toEqual(["test-model-1", "test-model-2"]);
 	});
 
 	it("rejects unknown status line segment ids", async () => {
@@ -270,9 +270,9 @@ describe("config list --scope", () => {
 			path.join(testAgentDir.path(), "config.yml"),
 			[
 				"enabledModels:",
-				"  - anthropic/claude-sonnet-4-5",
+				"  - test-b/test-model-3",
 				`  - path: ${projectDir.path()}`,
-				"    models: [openai/gpt-5]",
+				"    models: [test-a/test-model-4]",
 				"compaction:",
 				"  enabled: false",
 				"test:",
@@ -286,8 +286,8 @@ describe("config list --scope", () => {
 
 		expect(Object.keys(layer).toSorted()).toEqual(["compaction.enabled", "enabledModels", "test.token"]);
 		expect(layer.enabledModels.value).toEqual([
-			"anthropic/claude-sonnet-4-5",
-			{ path: projectDir.path(), models: ["openai/gpt-5"] },
+			"test-b/test-model-3",
+			{ path: projectDir.path(), models: ["test-a/test-model-4"] },
 		]);
 		expect(layer["compaction.enabled"]).toMatchObject({ value: false, type: "boolean" });
 		expect(layer["test.token"]).toEqual({
@@ -303,14 +303,14 @@ describe("config list --scope", () => {
 		await Bun.write(path.join(testAgentDir.path(), "config.yml"), "compaction:\n  enabled: false\n");
 		await Bun.write(
 			path.join(projectDir.path(), ".omp", "config.yml"),
-			"defaultThinkingLevel: high\nenabledModels: [openai/gpt-5]\n",
+			"defaultThinkingLevel: high\nenabledModels: [test-a/test-model-4]\n",
 		);
 
 		const layer = await listLayer("project");
 
 		expect(layer).toEqual({
 			defaultThinkingLevel: expect.objectContaining({ value: "high" }),
-			enabledModels: expect.objectContaining({ value: ["openai/gpt-5"], type: "array" }),
+			enabledModels: expect.objectContaining({ value: ["test-a/test-model-4"], type: "array" }),
 		});
 	});
 

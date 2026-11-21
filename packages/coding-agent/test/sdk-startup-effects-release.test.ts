@@ -23,7 +23,7 @@ describe("createAgentSession process-state holds", () => {
 
 	it("releases both holds when startup fails", async () => {
 		const previousEffects = effectsSettings();
-		const hostSettings = Settings.isolated({ disabledProviders: ["claude"] });
+		const hostSettings = Settings.isolated({ disabledProviders: ["test"] });
 		cleanups.push(initializeWithSettings(hostSettings));
 		const authStorage = createInMemoryAuthStorage();
 		const registryAuthStorage = createInMemoryAuthStorage();
@@ -41,7 +41,7 @@ describe("createAgentSession process-state holds", () => {
 		).rejects.toThrow("must be the same instance");
 
 		expect(effectsSettings()).toBe(previousEffects);
-		expect(isProviderEnabled("claude")).toBe(false);
+		expect(isProviderEnabled("test")).toBe(false);
 	});
 
 	it("keeps both driven by the remaining session when the first of two is disposed", async () => {
@@ -74,14 +74,14 @@ describe("createAgentSession process-state holds", () => {
 			});
 			return session;
 		};
-		const firstSettings = Settings.isolated({ disabledProviders: ["claude"] });
+		const firstSettings = Settings.isolated({ disabledProviders: ["test"] });
 		const secondSettings = Settings.isolated({ disabledProviders: ["cursor"] });
 		const first = await start(firstSettings);
 		const second = await start(secondSettings);
 
 		await first.dispose();
 		expect(effectsSettings()).toBe(secondSettings);
-		expect(isProviderEnabled("claude")).toBe(true);
+		expect(isProviderEnabled("test")).toBe(true);
 		expect(isProviderEnabled("cursor")).toBe(false);
 
 		await second.dispose();

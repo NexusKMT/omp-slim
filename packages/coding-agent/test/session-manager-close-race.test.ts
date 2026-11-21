@@ -152,7 +152,7 @@ describe("SessionManager close/appendMessage race", () => {
 		const storage = new CloseHoldingStorage();
 		const sm = SessionManager.create("/cwd", "/sessions", storage);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected built-in anthropic model to exist");
+		if (!model) throw new Error("Expected built-in test model to exist");
 
 		// Seed an assistant message so persist activates (the `#ensuredOnDisk`
 		// guard gates the first write on the first assistant entry). This

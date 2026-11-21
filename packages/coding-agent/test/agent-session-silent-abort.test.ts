@@ -31,9 +31,9 @@ function makeAbortedAssistantMessage(text = "partial draft"): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "aborted",
 		usage: {
 			input: 0,
@@ -63,7 +63,7 @@ async function createSessionWithObfuscator(
 	obfuscator?: SecretObfuscator,
 ): Promise<SessionFixture> {
 	const model = createTestModel({ provider: "test", id: "test-model" });
-	if (!model) throw new Error("Expected built-in anthropic model to exist");
+	if (!model) throw new Error("Expected built-in test model to exist");
 
 	const agent = new Agent({
 		initialState: {

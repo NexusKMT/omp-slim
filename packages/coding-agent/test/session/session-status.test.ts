@@ -32,7 +32,7 @@ function msg(message: unknown): string {
 
 const user = (text: string) => msg({ role: "user", content: text });
 const assistant = (stopReason: string, content: unknown[]) =>
-	msg({ role: "assistant", provider: "anthropic", model: "m", stopReason, content });
+	msg({ role: "assistant", provider: "test", model: "m", stopReason, content });
 const toolResult = () =>
 	msg({ role: "toolResult", toolCallId: "t1", toolName: "read", content: [{ type: "text", text: "ok" }] });
 const textBlock = (text: string) => ({ type: "text", text });
@@ -135,7 +135,7 @@ describe("SessionManager.list session status (tail derivation)", () => {
 			timestamp: new Date().toISOString(),
 			message: {
 				role: "assistant",
-				provider: "anthropic",
+				provider: "test",
 				model: "m",
 				stopReason: "stop",
 				content: [{ type: "text", text: bigAssistant }],

@@ -122,7 +122,7 @@ describe("task spawn routing", () => {
 
 	it("returns immediately on spawn and delivers the follow-up hint when the job completes", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [{ ...taskAgent, model: ["anthropic/claude-sonnet-4"] }],
+			agents: [{ ...taskAgent, model: ["test/test-model"] }],
 			projectAgentsDir: null,
 		});
 		const gate = deferred();
@@ -212,7 +212,7 @@ describe("task spawn routing", () => {
 
 	it("fires before_subagent_spawn once per child even though the task preflight resolves policy first", async () => {
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-			agents: [{ ...taskAgent, model: ["anthropic/claude-sonnet-4"] }],
+			agents: [{ ...taskAgent, model: ["test/test-model"] }],
 			projectAgentsDir: null,
 		});
 		const runSpy = vi
@@ -254,7 +254,7 @@ describe("task spawn routing", () => {
 	]) {
 		it(label, async () => {
 			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({
-				agents: [{ ...taskAgent, model: ["anthropic/claude-sonnet-4"] }],
+				agents: [{ ...taskAgent, model: ["test/test-model"] }],
 				projectAgentsDir: null,
 			});
 			const repoRoot = "/repo-root";

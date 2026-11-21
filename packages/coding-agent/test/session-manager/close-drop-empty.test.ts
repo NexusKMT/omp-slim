@@ -42,8 +42,8 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("drops the session file when close() runs with no user/assistant messages and no draft", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-drop-empty-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
-		session.appendModelChange("litellm/anthropic--claude-4.7-opus", "default");
+		session.appendModelChange("hai-proxy/test--test-model");
+		session.appendModelChange("litellm/test--test-model-2", "default");
 
 		await session.saveDraft("some in-progress text"); // materializes JSONL
 		await session.saveDraft(""); // sidecar unlinked; before fix, file survives
@@ -63,7 +63,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("drops the session file when only mode/model changes precede a cleared draft", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-drop-plan-startup-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		session.appendModeChange("plan", { planFilePath: "local://PLAN.md" });
 
 		await session.saveDraft("plan-mode draft");
@@ -80,7 +80,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("drops a resumed draft-only session after consumeDraft removes the sidecar", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-drop-resumed-draft-");
 		const firstRun = SessionManager.create(tempDir.path(), tempDir.path());
-		firstRun.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		firstRun.appendModelChange("hai-proxy/test--test-model");
 		await firstRun.saveDraft("resume me");
 
 		const sessionFile = firstRun.getSessionFile();
@@ -105,7 +105,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps the session file when another process consumed the draft and appended real messages", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-keep-cross-writer-");
 		const termA = SessionManager.create(tempDir.path(), tempDir.path());
-		termA.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		termA.appendModelChange("hai-proxy/test--test-model");
 		await termA.saveDraft("draft in terminal A");
 
 		const sessionFile = termA.getSessionFile();
@@ -125,7 +125,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps the session file when its current contents include a malformed record", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-keep-malformed-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		await session.saveDraft("draft in terminal A");
 
 		const sessionFile = session.getSessionFile();
@@ -143,7 +143,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 		const deleteAttemptPath = path.join(tempDir.path(), "delete-attempted");
 		const termAStorage = new SignalingDeleteStorage(deleteAttemptPath);
 		const termA = SessionManager.create(tempDir.path(), tempDir.path(), termAStorage);
-		termA.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		termA.appendModelChange("hai-proxy/test--test-model");
 		await termA.saveDraft("draft in terminal A");
 
 		const sessionFile = termA.getSessionFile();
@@ -195,7 +195,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps the session file when a draft sidecar is still present at close", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-keep-draft-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		await session.saveDraft("queued for next time");
 
 		const sessionFile = session.getSessionFile();
@@ -212,7 +212,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps an otherwise empty session that holds an /annotate draft", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-keep-annotation-draft-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		await session.saveDraft("materialize session");
 		await session.saveDraft("");
 		const sessionFile = session.getSessionFile()!;
@@ -228,7 +228,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps an empty session while an /annotate overlay is open, before its draft is written", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-open-annotation-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		await session.saveDraft("materialize session");
 		await session.saveDraft("");
 		const sessionFile = session.getSessionFile()!;
@@ -247,7 +247,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("keeps the session file when it contains a real user message", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-keep-user-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		await session.saveDraft("draft that will be cleared");
 		await session.saveDraft("");
@@ -298,7 +298,7 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 	it("is a no-op when the session file was never materialized", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-never-materialized-");
 		const session = SessionManager.create(tempDir.path(), tempDir.path());
-		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		session.appendModelChange("hai-proxy/test--test-model");
 
 		const sessionFile = session.getSessionFile();
 		if (!sessionFile) throw new Error("Expected persistent session file path");

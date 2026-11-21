@@ -27,7 +27,7 @@ const { session } = await createAgentSession({
 	authStorage,
 	modelRegistry,
 	settings,
-	model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+	model: createTestModel({ provider: "anthropic", id: "test-model" }),
 	disableExtensionDiscovery: true,
 	skills: [],
 	contextFiles: [],
@@ -50,9 +50,9 @@ session.runEphemeralTurn = async args => {
 		assistantMessage: {
 			role: "assistant" as const,
 			content: [{ type: "text" as const, text }],
-			api: "anthropic-messages" as const,
+			api: "openai-completions" as const,
 			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,

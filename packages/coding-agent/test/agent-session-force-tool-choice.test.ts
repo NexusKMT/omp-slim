@@ -22,7 +22,7 @@ let mock: MockModel;
 beforeEach(() => {
 	tempDir = TempDir.createSync("@pi-agent-session-force-tool-");
 	const model = createTestModel({ provider: "test", id: "test-model" });
-	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+	if (!model) throw new Error("Expected test-model model to exist");
 
 	authStorage = createInMemoryAuthStorage();
 	authStorage.keys.setRuntime("test", "test-key");

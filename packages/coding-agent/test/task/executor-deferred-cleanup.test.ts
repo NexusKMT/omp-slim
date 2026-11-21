@@ -30,8 +30,8 @@ function assistantStop(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: {
 			input: 0,

@@ -71,7 +71,7 @@ describe("storage process-exit cleanup", () => {
 			`const history = HistoryStorage.open(${JSON.stringify(historyDbPath)});`,
 			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
 			'void history.add("written immediately before exit", "/tmp", "exit-session");',
-			'void agent.recordModelPerf("openai/repro", { outputTokens: 10, durationMs: 1000 });',
+			'void agent.recordModelPerf("test/repro", { outputTokens: 10, durationMs: 1000 });',
 			"process.exit(0);",
 		].join("\n");
 		const child = Bun.spawn([process.execPath, "--eval", script], {
@@ -103,7 +103,7 @@ describe("storage process-exit cleanup", () => {
 			expect(
 				agentDb
 					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
-						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/repro'",
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'test/repro'",
 					)
 					.get(),
 			).toEqual({ samples: 1, output_tokens: 10, gen_ms: 1000 });
@@ -166,7 +166,7 @@ describe("storage process-exit cleanup", () => {
 			// Open while the blocker keeps cleanupStage="running". The exit-only
 			// registration must stay armed rather than firing before publication.
 			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
-			'void agent.recordModelPerf("openai/running", { outputTokens: 30, durationMs: 3000 });',
+			'void agent.recordModelPerf("test/running", { outputTokens: 30, durationMs: 3000 });',
 			"gate.resolve();",
 			"await cleanup;",
 			"process.exit(0);",
@@ -190,7 +190,7 @@ describe("storage process-exit cleanup", () => {
 			expect(
 				agentDb
 					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
-						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/running'",
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'test/running'",
 					)
 					.get(),
 			).toEqual({ samples: 1, output_tokens: 30, gen_ms: 3000 });
@@ -211,7 +211,7 @@ describe("storage process-exit cleanup", () => {
 			`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
 			"await postmortem.cleanup();",
 			`const agent = await AgentStorage.open(${JSON.stringify(agentDbPath)});`,
-			'void agent.recordModelPerf("openai/rearm", { outputTokens: 20, durationMs: 2000 });',
+			'void agent.recordModelPerf("test/rearm", { outputTokens: 20, durationMs: 2000 });',
 			"process.exit(0);",
 		].join("\n");
 		const child = Bun.spawn([process.execPath, "--eval", script], {
@@ -228,7 +228,7 @@ describe("storage process-exit cleanup", () => {
 			expect(
 				agentDb
 					.query<{ samples: number; output_tokens: number; gen_ms: number }, []>(
-						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'openai/rearm'",
+						"SELECT samples, output_tokens, gen_ms FROM model_perf WHERE model_key = 'test/rearm'",
 					)
 					.get(),
 			).toEqual({ samples: 1, output_tokens: 20, gen_ms: 2000 });

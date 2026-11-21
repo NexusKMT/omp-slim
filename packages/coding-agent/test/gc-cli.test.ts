@@ -2872,9 +2872,9 @@ describe("runGcCommand replay data stripping", () => {
 			type: "message",
 			message: {
 				role: "assistant",
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-opus-4-5",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "stop",
 				content,
 				...extra,
@@ -2904,7 +2904,7 @@ describe("runGcCommand replay data stripping", () => {
 					requestControls: { messageIndex: 1 },
 					providerPayload: {
 						type: "openaiResponsesHistory",
-						provider: "openai-codex",
+						provider: "test",
 						dt: true,
 						items: [{ type: "reasoning", encrypted_content: "gAAAA" }],
 					},
@@ -2922,7 +2922,7 @@ describe("runGcCommand replay data stripping", () => {
 							type: "image",
 							data: "aGk=",
 							mimeType: "image/png",
-							providerFile: { provider: "openai", id: "file_1" },
+							providerFile: { provider: "test", id: "file_1" },
 						},
 					],
 				},
@@ -2933,7 +2933,7 @@ describe("runGcCommand replay data stripping", () => {
 					{ type: "thinking", thinking: "field", thinkingSignature: "reasoning_content" },
 					{ type: "text", text: "noted", textSignature: '{"v":1,"id":"msg_1","phase":"commentary"}' },
 				],
-				{ providerPayload: { type: "openaiResponsesHistory", provider: "openai-codex", items: [] } },
+				{ providerPayload: { type: "openaiResponsesHistory", provider: "test", items: [] } },
 			),
 			assistant([
 				{ type: "thinking", thinking: "latest", thinkingSignature: "EqQBlatest" },
@@ -2960,9 +2960,9 @@ describe("runGcCommand replay data stripping", () => {
 		expect(lines[0]).toBe(original[0]);
 		expect(JSON.parse(lines[1]).message).toEqual({
 			role: "assistant",
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-opus-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "toolUse",
 			content: [
 				{ type: "thinking", thinking: "plan" },

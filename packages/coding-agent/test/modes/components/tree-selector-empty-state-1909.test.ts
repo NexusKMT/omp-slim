@@ -17,7 +17,7 @@ function freshSessionTree(): SessionTreeNode[] {
 		id: "e1",
 		parentId: null,
 		timestamp: new Date().toISOString(),
-		model: "anthropic/claude-sonnet-4-20250514",
+		model: "test/test-model",
 	};
 	const thinkingChange: SessionEntry = {
 		type: "thinking_level_change",

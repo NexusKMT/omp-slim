@@ -1,5 +1,5 @@
 import { buildModel } from "@oh-my-pi/pi-ai/build";
-import type { Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import type { Model } from "@oh-my-pi/pi-ai/types";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { afterEach, beforeEach } from "bun:test";
 import * as os from "node:os";
@@ -53,25 +53,6 @@ export async function waitForDelayOrAbort(delayMs: number, signal: AbortSignal |
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onAbort);
 	}
-}
-
-export function createCodexModel(
-	id: string,
-	spec?: Partial<ModelSpec<"openai-codex-responses">>,
-): Model<"openai-codex-responses"> {
-	return buildModel({
-		id,
-		name: id,
-		api: "openai-codex-responses",
-		provider: "openai-codex",
-		baseUrl: "https://api.openai.com/v1",
-		reasoning: true,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 272000,
-		maxTokens: 128000,
-		...spec,
-	});
 }
 
 export interface AuthGatewayE2EStatus {

@@ -7,8 +7,8 @@ function createPartial(text = ""): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "test-model",
 		usage: {
 			input: 0,

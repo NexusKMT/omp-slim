@@ -27,7 +27,7 @@ describe("commit agent prompt attribution", () => {
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected claude-sonnet-4-5 model to exist");
+			throw new Error("Expected test-model model to exist");
 		}
 
 		await runCommitAgentSession({
@@ -74,7 +74,7 @@ describe("commit agent prompt attribution", () => {
 
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("Expected claude-sonnet-4-5 model to exist");
+			throw new Error("Expected test-model model to exist");
 		}
 
 		await runCommitAgentSession({

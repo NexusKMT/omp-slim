@@ -47,8 +47,8 @@ function assistantStopMessage(content: AssistantMessage["content"]): AssistantMe
 	return {
 		role: "assistant",
 		content,
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: {
 			input: 0,

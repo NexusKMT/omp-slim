@@ -82,7 +82,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		/** Seed a kept-recent entry between firstKeptEntryId and the archive —
 		 *  re-emitted by buildSessionContext, so the rescue budget must charge it. */
 		preArchiveKeptText?: string;
-		/** Bundled model to run on instead of Claude Sonnet 4.5. */
+		/** Bundled model to run on instead of Test Model. */
 		model?: Model;
 	}): Promise<void> {
 		tempDir = TempDir.createSync("@pi-snapcompact-frame-dead-end-");
@@ -127,7 +127,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 
 		const bundled = options.model ?? createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) {
-			throw new Error("Expected built-in anthropic model to exist");
+			throw new Error("Expected built-in test model to exist");
 		}
 		// Pin the window: threshold/band math below is tuned to 200k.
 		const model = {
@@ -225,9 +225,9 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		return {
 			role: "assistant" as const,
 			content: [{ type: "text" as const, text: "Done." }],
-			api: "anthropic-messages" as const,
-			provider: "anthropic" as const,
-			model: "claude-sonnet-4-5",
+			api: "openai-completions" as const,
+			provider: "test" as const,
+			model: "test-model",
 			stopReason: "stop" as const,
 			usage: {
 				input: 190000,
@@ -324,9 +324,9 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 		expect(recovery[0].level).toBe("info");
 	});
 
-	it("rebuilds the archive for a Claude reader without its reasoning", async () => {
+	it("rebuilds the archive for a reader without its reasoning", async () => {
 		// The rescue re-renders for the active model, so it must apply that
-		// model's reasoning policy: an Anthropic reader gets no `¶think:` scope.
+		// model's reasoning policy: a reader gets no `¶think:` scope.
 		await createSession({ frameCount: SEEDED_FRAME_COUNT });
 		const isCompaction = (entry: { type: string }): entry is CompactionEntry => entry.type === "compaction";
 		const stale = sessionManager.getBranch().findLast(isCompaction)!;
@@ -418,7 +418,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 	});
 
 	it("still runs the elide tiers and warns when the frame rebuild frees too little", async () => {
-		// Codex review on #6362: the latest archive may not be the oversized
+		// review on #6362: the latest archive may not be the oversized
 		// tail (e.g. a huge kept tool result sits after it). A frame-count
 		// shrink alone must NOT count as success — the elide/image tiers still
 		// get their shot at the real tail, and the no-progress warning stays.
@@ -477,7 +477,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 	});
 
 	it("bails when the kept tail plus fixed context leaves no frame budget", async () => {
-		// Codex review on #6362 (round 5): a tail just under the recovery band
+		// review on #6362 (round 5): a tail just under the recovery band
 		// still cannot coexist with the fixed context + a minimum rebuilt
 		// archive. The budget now charges the kept tail like
 		// #compactionCreatedHeadroom does, so the rescue must bail instead of
@@ -509,7 +509,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 	});
 
 	it("bails when the kept region BEFORE the archive leaves no frame budget", async () => {
-		// Codex review on #6362 (round 6): the rebuilt compaction preserves
+		// review on #6362 (round 6): the rebuilt compaction preserves
 		// firstKeptEntryId, and buildSessionContext re-emits the kept messages
 		// that sit BEFORE the compaction entry — so a large pre-archive kept
 		// region costs the rebuilt prompt exactly like a post-archive tail.
@@ -532,7 +532,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 	});
 
 	it("leaves an oversized non-archive tail to the elide tiers instead of rescuing the archive", async () => {
-		// Codex review on #6362 (round 4): with […, archive, HUGE kept tool
+		// review on #6362 (round 4): with […, archive, HUGE kept tool
 		// result], rebuilding the archive would append the replacement at the
 		// leaf — making the branch tail a compaction entry that
 		// prepareCompaction's last-entry guard can never summarize past, even

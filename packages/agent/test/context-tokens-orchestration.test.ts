@@ -16,7 +16,7 @@ function usage(overrides: Partial<Usage>): Usage {
 
 describe("calculateContextTokens", () => {
 	it("excludes provider orchestration tokens from context sizing", () => {
-		// Codex-style turn: conversation prefix is ~186k, orchestration adds 5.5k;
+		// A style turn: conversation prefix is ~186k, orchestration adds 5.5k;
 		// context sizing must stay on the conversation, not the billable total.
 		const u = usage({
 			input: 5_517,

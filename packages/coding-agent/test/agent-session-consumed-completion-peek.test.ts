@@ -59,7 +59,7 @@ describe("AgentSession peek at consumed background completions", () => {
 	}
 
 	function createSession(responses: MockHandler[], options: { launch?: boolean } = {}): AgentSession {
-		const mock = createMockModel({ provider: "test", id: "gpt-test", responses });
+		const mock = createMockModel({ provider: "test", id: "test-model", responses });
 		const wait = new WaitTool({
 			cwd: tempDir.path(),
 			settings: Settings.isolated({ "launch.enabled": options.launch ?? false }),

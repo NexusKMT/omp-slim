@@ -104,9 +104,9 @@ describe("Kitty PNG conversion cache", () => {
 		return {
 			role: "assistant",
 			content: [{ type: "text", text: "done" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "stop",
 			usage: {
 				input: 0,

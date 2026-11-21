@@ -123,7 +123,7 @@ async function createHarness(): Promise<ShutdownHarness> {
 
 	const session = {
 		extensionRunner: undefined,
-		model: { provider: "anthropic", id: "test-model" },
+		model: { provider: "test", id: "test-model" },
 		settings: Settings.isolated(),
 		sessionManager: manager,
 		subscribe: () => {},

@@ -40,7 +40,7 @@ describe("read-only session blob hydration", () => {
 		if (visible.message.role !== "user") throw new Error("Expected user fixture");
 		visible.message.providerPayload = {
 			type: "openaiResponsesHistory",
-			provider: "openai",
+			provider: "test",
 			items: [{ type: "message", role: "user", content: [{ type: "input_image", image_url: url.ref }] }],
 		};
 		const entries: FileEntry[] = [
@@ -144,7 +144,7 @@ describe("read-only session blob hydration", () => {
 			tokensBefore: 1000,
 			preserveData: {
 				openaiRemoteCompaction: {
-					provider: "openai-codex",
+					provider: "test",
 					replacementHistory: [
 						{ type: "message", role: "user", content: [{ type: "input_image", image_url: hidden.ref }] },
 						{ type: "image_generation_call", id: "ig_1", result: generated.ref },

@@ -6,7 +6,7 @@
  * compared against counted opaque provider-replay payloads
  * (`thinkingSignature` / `redactedThinking`) as ordinary text tokens, while the
  * imaged projection and the stored-context estimate exclude them (#2628). A
- * large OpenAI Codex `encrypted_content` signature in the archived region then
+ * large provider `encrypted_content` signature in the archived region then
  * inflated the removable baseline above the frame projection, so an
  * inflating image-frame result was accepted and persisted (context grew).
  *
@@ -39,7 +39,7 @@ describe("AgentSession snapcompact no-reduction guard: opaque reasoning", () => 
 		sessionManager = SessionManager.inMemory();
 
 		const bundled = createTestModel({ provider: "test", id: "test-model" });
-		if (!bundled) throw new Error("Expected bundled claude-sonnet-4-5 model");
+		if (!bundled) throw new Error("Expected bundled test-model model");
 		const model = { ...bundled, contextWindow: 200_000, maxTokens: 64_000 };
 
 		// A tiny real conversation whose archived region carries an opaque
@@ -53,9 +53,9 @@ describe("AgentSession snapcompact no-reduction guard: opaque reasoning", () => 
 					{ type: "thinking", thinking: "short", thinkingSignature: bigSignature },
 					{ type: "text", text: "first answer" },
 				],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-sonnet-4-5",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "stop",
 				usage: {
 					input: 20,

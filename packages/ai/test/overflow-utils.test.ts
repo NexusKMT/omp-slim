@@ -7,9 +7,9 @@ function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "" }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 0,
 			output: 0,
@@ -30,8 +30,8 @@ describe("context overflow evidence", () => {
 		"prompt (131072 tokens) leaves no room to answer in the context (131072); requests are never truncated",
 		"PROMPT ( 105522  TOKENS )+MAX  TOKENS( 25571 ) EXCEEDS  THE CONTEXT( 131072 )",
 		"PROMPT( 131072  TOKENS ) LEAVES  NO ROOM TO ANSWER IN THE  CONTEXT ( 131072 )",
-	])("recognizes Strata token-context evidence without usage: %s", detail => {
-		// OpenAI HTTP status/message plus the captured envelope, without the local request-dump path.
+	])("recognizes token-context evidence without usage: %s", detail => {
+		// Provider HTTP status/message plus the captured envelope, without the local request-dump path.
 		const errorMessage = `400 ${detail}\n${detail} (type=invalid_request_error)`;
 		const message: AIError.ContextOverflowMessage = { stopReason: "error", errorMessage };
 		expect(isContextOverflow(message)).toBe(true);
@@ -40,7 +40,7 @@ describe("context overflow evidence", () => {
 		expect(AIError.is(id, AIError.Flag.PayloadRejected)).toBe(false);
 	});
 
-	it("does not treat an output-token cap as Strata context overflow", () => {
+	it("does not treat an output-token cap as context overflow", () => {
 		const errorMessage = "400 max tokens (25571) exceeds the output limit (16384)";
 		expect(isContextOverflow({ stopReason: "error", errorMessage })).toBe(false);
 		expect(
@@ -69,7 +69,7 @@ describe("context overflow evidence", () => {
 	});
 
 	it("judges occupancy by contextTokens over per-turn input totals", () => {
-		// Cursor grok-4.7-high turn: summed turn-end input far over the 256k
+		// a high-window turn: summed turn-end input far over the 256k
 		// window, checkpoint context at ~20%.
 		const usage = { input: 458_717, cacheRead: 404_992, cacheWrite: 0, contextTokens: 49_925 };
 		expect(isContextOverflow({ stopReason: "stop", usage }, 256_000)).toBe(false);
@@ -80,7 +80,7 @@ describe("context overflow evidence", () => {
 });
 
 describe("isContextOverflow - a rate-limit status vetoes token-cap wording", () => {
-	// Bedrock's per-minute throttle reads like window excess to the text patterns;
+	// A provider's per-minute throttle reads like window excess to the text patterns;
 	// flagged as overflow, the turn skips retry and the fallback chain.
 	const throttle = "429 Too many tokens, please wait before trying again. (type=rate_limit_error)";
 
@@ -178,7 +178,7 @@ describe("isContextOverflow/isPayloadRejection - HTTP 413 variants", () => {
 		expect(isPayloadRejection(message)).toBe(false);
 	});
 });
-describe("isContextOverflow - 400/413 no-body (Cerebras, Mistral, proxy wrappers)", () => {
+describe("isContextOverflow - 400/413 no-body (various providers, proxy wrappers)", () => {
 	it("detects '400 (no body)' without 'status code' word", () => {
 		expect(isContextOverflow(createErrorMessage("400 (no body)"))).toBe(true);
 	});
@@ -315,9 +315,9 @@ describe("isTextAmbiguousContextOverflow - dual-flag arbitration shared by fallb
 		const message: AssistantMessage = {
 			role: "assistant",
 			content: [],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			stopReason: "error",
 			errorMessage: "request_too_large: image count exceeds the limit of 20",
 			usage: {

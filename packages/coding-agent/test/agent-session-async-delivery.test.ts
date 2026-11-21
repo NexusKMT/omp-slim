@@ -938,10 +938,10 @@ describe("AgentSession owner-routed async delivery", () => {
 	});
 
 	it("delivers a run that failed before yielding as the provider error, not a schema verdict", () => {
-		// Production 2026-09-21: `Structured output: schema invalid: Anthropic
+		// Production 2026-09-21: `Structured output: schema invalid: Provider
 		// stream envelope error: ...` with the half-streamed prose previewed as
 		// the payload. Nothing was validated, so no schema wording applies.
-		const error = "Anthropic stream envelope error: stream ended before message_stop";
+		const error = "Provider stream envelope error: stream ended before message_stop";
 		const job: AsyncJob = {
 			id: "DeadStream",
 			type: "task",

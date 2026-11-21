@@ -240,7 +240,7 @@ describe("SelectList", () => {
 		const items = [
 			{ value: "ollama", label: "Ollama" },
 			{ value: "kagi", label: "Kagi" },
-			{ value: "opencode-go", label: "OpenCode Go" },
+			{ value: "other-gateway", label: "Other Gateway" },
 			{ value: "tavily", label: "Tavily" },
 		];
 		const list = new SelectList(items, 3, testTheme);
@@ -249,10 +249,10 @@ describe("SelectList", () => {
 		list.handleInput("g");
 
 		const rendered = list.render(80).join("\n");
-		expect(rendered).toContain("OpenCode Go");
+		expect(rendered).toContain("Other Gateway");
 		expect(rendered).not.toContain("Ollama");
 		expect(rendered).toContain("Search: og");
-		expect(list.getSelectedItem()?.value).toBe("opencode-go");
+		expect(list.getSelectedItem()?.value).toBe("other-gateway");
 	});
 
 	it("keeps printable keys inert when the list does not overflow", () => {

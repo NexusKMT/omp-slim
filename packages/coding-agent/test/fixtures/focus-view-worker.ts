@@ -134,7 +134,7 @@ function textOf(content: unknown): string {
 
 const probe: FocusProbe = {
 	open: async (id, registry, overrides) => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("bundled model missing");
 		const agent = new Agent({
 			getApiKey: () => "test-key",

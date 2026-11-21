@@ -192,10 +192,10 @@ describe("parseArgs end-of-options (--)", () => {
 	});
 
 	it("does not interpret @ args or known value flags after --", () => {
-		const result = parseArgs(["--", "@file.md", "--model", "opus"]);
+		const result = parseArgs(["--", "@file.md", "--model", "test-model"]);
 		expect(result.model).toBeUndefined();
 		expect(result.fileArgs).toEqual([]);
-		expect(result.messages).toEqual(["@file.md", "--model", "opus"]);
+		expect(result.messages).toEqual(["@file.md", "--model", "test-model"]);
 	});
 
 	it("parses flags before -- and forwards the rest as text", () => {
@@ -225,9 +225,9 @@ describe("parseArgs @file parsing with quotes", () => {
 
 describe("restartArgv (/restart relaunch argv)", () => {
 	it("keeps configuration flags, drops positionals, and appends --restore", () => {
-		expect(restartArgv(["--model", "gpt-5", "fix the bug", "@notes.md"], "sid")).toEqual([
+		expect(restartArgv(["--model", "test-model", "fix the bug", "@notes.md"], "sid")).toEqual([
 			"--model",
-			"gpt-5",
+			"test-model",
 			"--restore",
 			"sid",
 		]);
@@ -251,7 +251,7 @@ describe("restartArgv (/restart relaunch argv)", () => {
 	});
 
 	it("treats everything after -- as prompt text and drops it", () => {
-		expect(restartArgv(["--print-thoughts", "--", "--model", "opus"], "sid")).toEqual([
+		expect(restartArgv(["--print-thoughts", "--", "--model", "test-model"], "sid")).toEqual([
 			"--print-thoughts",
 			"--restore",
 			"sid",
@@ -259,8 +259,8 @@ describe("restartArgv (/restart relaunch argv)", () => {
 	});
 
 	it("drops a fresh-session --goal so the relaunch passes goal and restore validation", () => {
-		const relaunch = restartArgv(["--goal", "ship the release", "--model", "gpt-5"], "sid");
-		expect(relaunch).toEqual(["--model", "gpt-5", "--restore", "sid"]);
+		const relaunch = restartArgv(["--goal", "ship the release", "--model", "test-model"], "sid");
+		expect(relaunch).toEqual(["--model", "test-model", "--restore", "sid"]);
 		expect(() => validateGoalLaunch(parseArgs(relaunch), true)).not.toThrow();
 		expect(() => validateRestoreLaunch(parseArgs(relaunch), true)).not.toThrow();
 	});

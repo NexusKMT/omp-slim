@@ -542,9 +542,9 @@ describe("InteractiveMode todo HUD persistence", () => {
 		session.sessionManager.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "Finished the plan." }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,

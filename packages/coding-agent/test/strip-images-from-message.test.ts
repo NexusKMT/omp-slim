@@ -119,9 +119,9 @@ describe("stripImagesFromMessage", () => {
 		const message: AgentMessage = {
 			role: "assistant",
 			content: [text("hi")],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,

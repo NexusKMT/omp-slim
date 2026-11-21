@@ -33,15 +33,15 @@ function plain(text: string): string {
 }
 
 describe("cache_hit status-line segment", () => {
-	it("computes hit rate over the full prompt (DeepSeek miss lives in input)", () => {
-		// DeepSeek: cacheRead = hit, input = miss, cacheWrite = 0.
+	it("computes hit rate over the full prompt (the provider miss lives in input)", () => {
+		// the provider: cacheRead = hit, input = miss, cacheWrite = 0.
 		// 800 / (800 + 0 + 200) = 80.00%.
 		const result = renderSegment("cache_hit", ctxWith({ cacheRead: 800, cacheWrite: 0, input: 200 }));
 		expect(result.visible).toBe(true);
 		expect(plain(result.content)).toContain("80.00%");
 	});
 
-	it("counts uncached input in the denominator alongside cacheWrite (Anthropic/OpenRouter)", () => {
+	it("counts uncached input in the denominator alongside cacheWrite (the provider)", () => {
 		// All prompt tokens count: 600 / (600 + 300 + 100) = 60.00%.
 		// (Dropping uncached input here would overstate the rate as 66.67%.)
 		const result = renderSegment("cache_hit", ctxWith({ cacheRead: 600, cacheWrite: 300, input: 100 }));

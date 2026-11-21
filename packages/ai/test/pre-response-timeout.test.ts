@@ -2,8 +2,8 @@ import { armPreResponseTimeout } from "@oh-my-pi/pi-ai/utils/idle-iterator";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 
 /**
- * Regression for the issue #2422 follow-up: the streaming providers (Codex SSE,
- * Bedrock, Gemini CLI, Ollama) used to hand `AbortSignal.timeout(firstEventMs)`
+ * Regression for the issue #2422 follow-up: the streaming providers
+ * used to hand `AbortSignal.timeout(firstEventMs)`
  * to `fetch` as a "pre-response" guard. That signal is an *absolute* wall-clock
  * deadline and stays bound to the request after headers arrive, so it aborted an
  * actively-streaming body (e.g. a large `write` tool call) with

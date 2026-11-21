@@ -43,9 +43,9 @@ function assistantWithBash(command: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command } }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "toolUse",
 		usage,
 		timestamp: Date.now(),

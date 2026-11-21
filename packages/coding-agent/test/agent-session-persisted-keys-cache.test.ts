@@ -39,7 +39,7 @@ describe("AgentSession persistence-keys cache", () => {
 		const tools: AgentTool[] = [];
 		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
-			throw new Error("bundled model claude-sonnet-4-5 not found");
+			throw new Error("bundled model test-model not found");
 		}
 		const agent = new Agent({
 			getApiKey: () => "fake-key",

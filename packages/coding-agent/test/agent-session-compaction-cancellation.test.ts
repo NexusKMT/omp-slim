@@ -83,7 +83,7 @@ describe.each([false, true])("AgentSession compaction cancellation source (exper
 		const modelRegistry = new ModelRegistry(authStorage);
 		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled Anthropic model");
+		if (!model) throw new Error("Expected bundled test model");
 		const settings = Settings.isolated({
 			"compaction.keepRecentTokens": 1,
 			"compaction.experimentalContextManagement": experimental,
@@ -114,8 +114,8 @@ describe.each([false, true])("AgentSession compaction cancellation source (exper
 		sessionManager.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "first answer" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
+			api: "openai-completions",
+			provider: "test",
 			model: model.id,
 			stopReason: "stop",
 			usage: {

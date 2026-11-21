@@ -101,9 +101,9 @@ const danglingToolCallEntries = [
 		message: {
 			role: "assistant",
 			content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "sleep 60" } }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 1,
 				output: 1,
@@ -193,9 +193,9 @@ function assistantEntry(
 		message: {
 			role: "assistant",
 			content: [{ type: "text", text }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: assistantUsage,
 			stopReason,
 			timestamp: messageTimestamp,
@@ -218,9 +218,9 @@ function toolCallAssistantEntry(
 		message: {
 			role: "assistant",
 			content: [{ type: "toolCall", id: toolCallId, name: "write", arguments: { path: "plan.md", content: "x" } }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: assistantUsage,
 			stopReason,
 			timestamp: messageTimestamp,

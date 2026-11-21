@@ -61,8 +61,8 @@ function assistantMsg(text: string) {
 	return {
 		role: "assistant" as const,
 		content: [{ type: "text" as const, text }],
-		api: "anthropic-messages" as const,
-		provider: "anthropic",
+		api: "openai-completions" as const,
+		provider: "test",
 		model: "test",
 		usage: {
 			input: 1,
@@ -410,7 +410,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 		// hold `$$HASH$$` placeholders in place of real secrets, and must be
 		// deobfuscated before validation — otherwise the reopened form shows
 		// the raw placeholder instead of the original question text
-		// (chatgpt-codex review on #5895).
+		// (review on #5895).
 		const SECRET = "SUPER_SECRET_TOKEN_12345";
 		const obfuscator = new SecretObfuscator([{ type: "plain", content: SECRET }]);
 		const plainQuestion = `Deploy using token ${SECRET}?`;
@@ -454,7 +454,7 @@ describe("AgentSession tree navigation onto an ask toolResult", () => {
 		// current leaf. The `targetId === oldLeafId` no-op short-circuit must
 		// not swallow the re-answer protocol in that case — a probe still
 		// needs to return `reopenAsk`, and a completion still needs to branch
-		// a new sibling (chatgpt-codex review on #5895).
+		// a new sibling (review on #5895).
 		const ctx = await createTestSession({ inMemory: true });
 		try {
 			const { session, sessionManager } = ctx;

@@ -35,7 +35,7 @@ describe("OpenAI transport concurrency-admission 429 (#8854)", () => {
 		const error = await postOpenAIStream({
 			url: "https://litellm.local/v1/chat/completions",
 			headers: {},
-			body: { model: "gpt-4o", messages: [] },
+			body: { model: "test-model", messages: [] },
 			signal: new AbortController().signal,
 			fetch,
 		}).then(
@@ -61,7 +61,7 @@ describe("OpenAI transport concurrency-admission 429 (#8854)", () => {
 		const error = await postOpenAIStream({
 			url: "https://litellm.local/v1/chat/completions",
 			headers: {},
-			body: { model: "gpt-4o", messages: [] },
+			body: { model: "test-model", messages: [] },
 			signal: new AbortController().signal,
 			fetch,
 		}).then(
@@ -94,9 +94,9 @@ describe("OpenAI transport concurrency-admission 429 (#8854)", () => {
 		});
 
 		const handle = await postOpenAIStream({
-			url: "https://api.openai.com/v1/chat/completions",
+			url: "https://api.example.invalid/v1/chat/completions",
 			headers: {},
-			body: { model: "gpt-4o", messages: [] },
+			body: { model: "test-model", messages: [] },
 			signal: new AbortController().signal,
 			fetch,
 		});

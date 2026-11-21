@@ -204,7 +204,7 @@ describe("task progress rendering", () => {
 			id: "ArchitectureScout",
 			agent: "scout",
 			description: "Inspect rendering boundaries",
-			resolvedModelIdentity: "openai/custom-architecture-model:high",
+			resolvedModelIdentity: "test/custom-architecture-model:high",
 			resolvedThinkingLevel: ThinkingLevel.High,
 		};
 		const snapshots: { details: TaskToolDetails; status?: string }[] = [
@@ -244,7 +244,7 @@ describe("task progress rendering", () => {
 				expect(plainRows.join("\n")).toContain(metadata.description);
 				if (width === 160) {
 					const thinkingGlyph = theme.thinking.high.split(" ")[0];
-					expect(firstStatusRow).toContain("openai/");
+					expect(firstStatusRow).toContain("test/");
 					expect(firstStatusRow).toContain(":high");
 					expect(firstStatusRow).toContain(thinkingGlyph);
 					const badge = firstStatusRow!

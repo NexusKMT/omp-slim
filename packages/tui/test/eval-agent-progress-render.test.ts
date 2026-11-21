@@ -202,7 +202,7 @@ describe("eval renderer: agent() progress below the cell box", () => {
 
 	it("keeps agent identities and failure status within the viewport across resizes", () => {
 		setFeedModelBadgeEnabled(true);
-		const model = "openai-codex/gpt-6-astra";
+		const model = "test/test-model";
 		const intent = "Reading renderer and framework boundaries";
 		const statusEvents: EvalStatusEvent[] = [
 			{

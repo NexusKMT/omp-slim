@@ -82,7 +82,7 @@ describe("deduplicateMCPToolsByName", () => {
 describe("createMCPToolName", () => {
 	it("caps overlong names at 64 chars so strict validators accept them (#9130)", () => {
 		// chrome-devtools-mcp's performance_analyze_insight minted to 68 chars,
-		// which Meta/OpenAI Responses reject with HTTP 400 "name must be at most
+		// which the Responses API rejects with HTTP 400 "name must be at most
 		// 64 characters".
 		const name = createMCPToolName("chrome-devtools-mcp", "chrome_devtools_performance_analyze_insight");
 		expect(name.length).toBeLessThanOrEqual(64);

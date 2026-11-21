@@ -29,15 +29,15 @@ describe("issue #775: per-model defaultLevel", () => {
 		tempDir.removeSync();
 	});
 
-	function getOpus() {
-		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("expected claude-opus-4-5");
+	function getTargetModel() {
+		const model = createTestModel({ provider: "test", id: "test-model-2" });
+		if (!model) throw new Error("expected test-model-2");
 		return model;
 	}
 
-	function getSonnet() {
+	function getBaseModel() {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("expected claude-sonnet-4-5");
+		if (!model) throw new Error("expected test-model");
 		return model;
 	}
 
@@ -65,10 +65,10 @@ describe("issue #775: per-model defaultLevel", () => {
 	}
 
 	it("setModel adopts model.thinking.defaultLevel when present", async () => {
-		const sonnet = getSonnet();
-		const opus = getOpus();
-		const opusWithDefault: Model = {
-			...opus,
+		const baseModel = getBaseModel();
+		const targetModel = getTargetModel();
+		const targetWithDefault: Model = {
+			...targetModel,
 			thinking: {
 				mode: "effort",
 				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
@@ -77,23 +77,23 @@ describe("issue #775: per-model defaultLevel", () => {
 		};
 
 		const settings = Settings.isolated({ defaultThinkingLevel: Effort.Medium });
-		await createSession(sonnet, settings);
+		await createSession(baseModel, settings);
 		expect(session.thinkingLevel).toBe(Effort.Low);
 
-		await session.setModel(opusWithDefault);
+		await session.setModel(targetWithDefault);
 
 		expect(session.thinkingLevel).toBe(Effort.XHigh);
 	});
 
 	it("setModel preserves current level when model has no defaultLevel", async () => {
-		const sonnet = getSonnet();
-		const opus = getOpus();
+		const baseModel = getBaseModel();
+		const targetModel = getTargetModel();
 
 		const settings = Settings.isolated({ defaultThinkingLevel: Effort.Medium });
-		await createSession(sonnet, settings);
+		await createSession(baseModel, settings);
 		expect(session.thinkingLevel).toBe(Effort.Low);
 
-		await session.setModel(opus);
+		await session.setModel(targetModel);
 
 		expect(session.thinkingLevel).toBe(Effort.Low);
 	});

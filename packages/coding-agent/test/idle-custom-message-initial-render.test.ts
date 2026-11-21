@@ -53,7 +53,7 @@ afterEach(async () => {
 
 /** Interactive transcript wired like InteractiveMode before its initial render, with a pre-render banner. */
 function createInteractiveTranscript() {
-	const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
+	const model = createMockModel({ provider: "test", id: "test-model" }).model;
 	const agent = new Agent({
 		getApiKey: () => "test-key",
 		initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },

@@ -12,8 +12,8 @@ function msg(content: AssistantMessage["content"], extra: Partial<AssistantMessa
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "m",
 		usage: {
 			input: 0,
@@ -254,7 +254,7 @@ describe("AssistantMessageComponent streaming fast path", () => {
 		expect(rendered).not.toContain(". . .");
 	});
 
-	it("repairs Gemini's lone closing fence when the streamed turn becomes final", () => {
+	it("repairs the provider's lone closing fence when the streamed turn becomes final", () => {
 		const text = `=== PACED IP ROTATION SOAK RESULTS ===
 Average Latency: 1,240 ms
 \`\`\`

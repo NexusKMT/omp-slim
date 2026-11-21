@@ -39,9 +39,9 @@ function createAssistantMessage(text: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage,
 		stopReason: "stop",
 		timestamp: Date.now(),
@@ -64,7 +64,7 @@ function makeFakeSession(
 	runEphemeralTurn: (args: RunEphemeralTurnArgs) => Promise<RunEphemeralTurnResult>,
 ): InteractiveModeContext["session"] {
 	return {
-		model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+		model: { provider: "test", id: "test-model" },
 		isStreaming: false,
 		messages: [],
 		runEphemeralTurn,
@@ -722,15 +722,15 @@ describe("BtwController", () => {
 	it("branches the sanitized reply text without native replay payload metadata", async () => {
 		const providerPayload = {
 			type: "openaiResponsesHistory" as const,
-			provider: "openai-codex",
+			provider: "test-alt",
 			dt: true,
 			items: [{ type: "reasoning", encrypted_content: "raw-ephemeral-output" }],
 		};
 		const assistantMessage: AssistantMessage = {
 			...createAssistantMessage("raw ephemeral output"),
-			api: "openai-codex-responses",
-			provider: "openai-codex",
-			model: "gpt-5-codex",
+			api: "openai-completions",
+			provider: "test-alt",
+			model: "test-model-2",
 			content: [
 				{ type: "thinking", thinking: "reasoning", thinkingSignature: "native-signature", itemId: "rs_1" },
 				{ type: "text", text: "raw ephemeral output" },

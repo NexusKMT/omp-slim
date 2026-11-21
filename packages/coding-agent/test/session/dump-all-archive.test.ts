@@ -28,7 +28,7 @@ function subagentJsonl(id: string, userText: string | null): string {
 				id: `${id}-m`,
 				parentId: null,
 				timestamp: "2026-10-01T00:00:01.000Z",
-				model: "anthropic/claude-x",
+				model: "test/test-model",
 			}),
 			JSON.stringify({
 				type: "message",
@@ -49,7 +49,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 
 	function createSession(prompt: string): AgentSession {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled anthropic model");
+		if (!model) throw new Error("Expected bundled test model");
 		const authStorage = createInMemoryAuthStorage();
 		return new AgentSession({
 			agent: new Agent({
@@ -100,7 +100,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		const text = (name: string) => new TextDecoder().decode(entries.get(name));
 		expect(text("session.md")).toContain("main prompt");
 		expect(text("session.md")).not.toContain("scout task");
-		expect(text("subagents/Scout.md")).toStartWith("# Subagent: Scout\n\nModel: anthropic/claude-x\n");
+		expect(text("subagents/Scout.md")).toStartWith("# Subagent: Scout\n\nModel: test/test-model\n");
 		expect(text("subagents/Scout.md")).toContain("scout task");
 		expect(text("subagents/Scout.md")).not.toContain("helper task");
 		expect(text("subagents/Scout/Helper.md")).toContain("helper task");
@@ -122,9 +122,9 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		scout.agent.state.streamMessage = {
 			role: "assistant",
 			content: [{ type: "thinking", thinking: "Mentally compiling block.rs" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,
@@ -141,9 +141,9 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		worker.agent.state.messages.push({
 			role: "assistant",
 			content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "cargo build" } }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,
@@ -217,7 +217,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 			.split("\n")
 			.map(line => JSON.parse(line));
 		expect(scoutLines.map(line => line.type)).toEqual(["session", "model_change", "message"]);
-		expect(scoutLines[1].model).toBe("anthropic/claude-x");
+		expect(scoutLines[1].model).toBe("test/test-model");
 		expect(scoutLines[2].message.content).toMatch(/^\[redacted #\d+: 10 chars, 1 line\]$/);
 		for (const name of archive.files) {
 			const body = new TextDecoder().decode(entries.get(name));
@@ -250,7 +250,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 		const file = path.join(tempDir.path(), "corrupt.jsonl");
 		await Bun.write(file, `${subagentJsonl("main", "hello")}{"type":"message","id":"broken`);
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled anthropic model");
+		if (!model) throw new Error("Expected bundled test model");
 		const reopened = new AgentSession({
 			agent: new Agent({
 				initialState: {

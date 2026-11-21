@@ -163,7 +163,7 @@ describe("issue #2034: chunk large terminal writes on a ConPTY host", () => {
 			// Each CJK ideograph is one BMP code unit but encodes to 3 UTF-8
 			// bytes. A code-unit-based cap would silently let a write reach
 			// ~3× the configured size and reintroduce the #2034 viewport bug
-			// for non-ASCII content (codex review on #2101).
+			// for non-ASCII content (review on #2101).
 			const cjkLine = "字".repeat(200); // 200 code units, 600 UTF-8 bytes
 			const rows: string[] = [];
 			for (let i = 0; i < 200; i++) rows.push(cjkLine);

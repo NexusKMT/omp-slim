@@ -43,9 +43,9 @@ function assistantMessage(content: AssistantMessage["content"], stopReason: stri
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage,
 		stopReason,
 		timestamp: 2,
@@ -480,7 +480,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 			AgentSessionEvent,
 			{ type: "message_start" }
 		>);
-		// Provider (e.g. GitHub Copilot) streams the tool block before its id: the
+		// Provider (e.g. a streaming provider) streams the tool block before its id: the
 		// first delta carries an empty id, a later delta populates it.
 		await ec.handleEvent({
 			type: "message_update",
@@ -555,7 +555,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		expect(matchingCards).toHaveLength(1);
 	});
 
-	it("re-keys a streamed tool card when its id grows across deltas (piped copilot id)", async () => {
+	it("re-keys a streamed tool card when its id grows across deltas (piped provider id)", async () => {
 		const ec = mode.eventController;
 		await ec.handleEvent({ type: "agent_start" } as Extract<AgentSessionEvent, { type: "agent_start" }>);
 		await ec.handleEvent({ type: "message_start", message: assistantMessage([], "toolUse") } as Extract<

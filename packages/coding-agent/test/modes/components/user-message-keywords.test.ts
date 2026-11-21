@@ -97,9 +97,9 @@ describe("UserMessageComponent magic-keyword highlighting", () => {
 	});
 
 	it("collapses model tags before Markdown and renders the visible label in model styling", () => {
-		const label = modelMentionChipLabel("Claude (Fast)");
+		const label = modelMentionChipLabel("Test Model (Fast)");
 		const bubbleReset = `${theme.getFgOnBgAnsi("userMessageText", "userMessageBg")}${theme.getBgAnsi("userMessageBg")}`;
-		const raw = render('ask <model agent="m1" name="Claude (Fast)"/> then continue');
+		const raw = render('ask <model agent="m1" name="Test Model (Fast)"/> then continue');
 		expect(Bun.stripANSI(raw)).toContain(`ask ${label} then continue`);
 		expect(raw).not.toContain("<model agent=");
 		expect(raw).toContain(modelChipStyle(label, bubbleReset));

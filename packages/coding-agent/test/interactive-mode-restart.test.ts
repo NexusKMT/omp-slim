@@ -71,9 +71,9 @@ describe("InteractiveMode restart", () => {
 		sessionManager.appendMessage({ role: "user", content: "initial request", timestamp: 1 });
 		sessionManager.appendMessage({
 			role: "assistant",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
-			api: "anthropic-messages",
+			provider: "test",
+			model: "test-model",
+			api: "openai-completions",
 			content: [{ type: "text", text: "saved answer" }],
 			stopReason: "stop",
 			usage: {
@@ -97,7 +97,7 @@ describe("InteractiveMode restart", () => {
 			"--session",
 			file,
 			"--model",
-			"anthropic/claude-sonnet-4-5",
+			"test/test-model",
 			"--append-system-prompt",
 			"persona prompt",
 			"--skills",
@@ -105,11 +105,11 @@ describe("InteractiveMode restart", () => {
 			"-e",
 			"/office/extension.ts",
 			"--model",
-			"openai-codex/gpt-6.1-sol:high",
+			"test/test-model-2",
 			"initial request",
 		]);
 		const parsed = parseArgs(command.slice(command.indexOf("--model")));
-		expect(parsed.model).toBe("openai-codex/gpt-6.1-sol:high");
+		expect(parsed.model).toBe("test/test-model-2");
 		expect(parsed.messages).toEqual([]);
 		const resumed = await createSessionManager(parsed, tempDir.path(), Settings.isolated());
 		if (!resumed) throw new Error("expected resumed journal");
@@ -131,7 +131,7 @@ describe("InteractiveMode restart", () => {
 		const file = sessionManager.getSessionFile();
 		if (!file) throw new Error("expected persisted journal");
 		const id = sessionManager.getSessionId();
-		const command = await restart(["--model", "anthropic/claude-sonnet-4-5", `--session-dir=${relativeDir.path()}`]);
+		const command = await restart(["--model", "test/test-model", `--session-dir=${relativeDir.path()}`]);
 		const parsed = parseArgs(command.slice(command.indexOf("--model")));
 		const resumed = await createSessionManager(parsed, tempDir.path(), Settings.isolated());
 		if (!resumed) throw new Error("expected resumed journal");
@@ -148,7 +148,7 @@ describe("InteractiveMode restart", () => {
 
 	it("does not resume a journal that has never materialized", async () => {
 		const file = sessionManager.getSessionFile();
-		const command = await restart(["--model", "anthropic/claude-sonnet-4-5", "initial request"]);
+		const command = await restart(["--model", "test/test-model", "initial request"]);
 		const parsed = parseArgs(command.slice(command.indexOf("--model")));
 		expect(parsed.resume).toBeUndefined();
 		expect(parsed.messages).toEqual([]);

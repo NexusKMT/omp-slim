@@ -33,7 +33,7 @@ describe("session transitions while a tool runs", () => {
 	/** Start a turn whose only tool call settles when the turn is aborted, like `wait` on a long job. */
 	async function startRunningTool(toolName = "wait") {
 		const model = createTestModel({ provider: "test", id: "test-model" });
-		if (!model) throw new Error("Expected bundled Anthropic model");
+		if (!model) throw new Error("Expected bundled test model");
 		const toolStarted = Promise.withResolvers<void>();
 		const waitTool: AgentTool = {
 			name: toolName,

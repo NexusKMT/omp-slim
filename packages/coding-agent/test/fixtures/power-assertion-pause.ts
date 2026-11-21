@@ -37,7 +37,7 @@ const tool: AgentTool<typeof schema> = {
 		return { content: [{ type: "text", text: "done" }], details: {} };
 	},
 };
-const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+const model = createTestModel({ provider: "anthropic", id: "test-model" });
 if (!model) throw new Error("Missing bundled test model");
 const mock = createMockModel({
 	responses: [

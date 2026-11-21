@@ -45,8 +45,8 @@ describe("resolveEditMode", () => {
 		restoreEnv();
 	});
 
-	test("keeps explicit K3 edit-mode overrides ahead of the fallback", () => {
-		for (const activeModel of ["kimi-code/k3", "kimi-coding/K3-256K"]) {
+	test("keeps explicit test edit-mode overrides ahead of the fallback", () => {
+		for (const activeModel of ["test/test-model", "test/test-model-2"]) {
 			expect(resolveEditMode(createSession({ activeModel, modelVariant: "hashline" }))).toBe("hashline");
 			expect(resolveEditMode(createSession({ activeModel, settingsMode: "apply_patch" }))).toBe("apply_patch");
 
@@ -60,26 +60,26 @@ describe("resolveEditMode", () => {
 		}
 	});
 
-	test("does not exclude non-Kimi Moonshot models", () => {
+	test("does not exclude non-test models", () => {
 		delete Bun.env.PI_EDIT_VARIANT;
 
-		expect(resolveEditMode(createSession({ activeModel: "moonshot/moonshot-v1-128k" }))).toBe("hashline");
+		expect(resolveEditMode(createSession({ activeModel: "test/test-model-4" }))).toBe("hashline");
 	});
 
-	test("keeps explicit model variants ahead of the Kimi fallback", () => {
+	test("keeps explicit model variants ahead of the test fallback", () => {
 		delete Bun.env.PI_EDIT_VARIANT;
 
 		expect(
 			resolveEditMode(
-				createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct", modelVariant: "hashline" }),
+				createSession({ activeModel: "test/test-model-3", modelVariant: "hashline" }),
 			),
 		).toBe("hashline");
 	});
 
-	test("keeps PI_EDIT_VARIANT ahead of the Kimi fallback", () => {
+	test("keeps PI_EDIT_VARIANT ahead of the test fallback", () => {
 		Bun.env.PI_EDIT_VARIANT = "hashline";
 
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct" }))).toBe(
+		expect(resolveEditMode(createSession({ activeModel: "test/test-model-3" }))).toBe(
 			"hashline",
 		);
 	});
@@ -89,16 +89,16 @@ describe("resolveEditMode", () => {
 
 		expect(
 			resolveEditMode(
-				createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct", settingsMode: "apply_patch" }),
+				createSession({ activeModel: "test/test-model-3", settingsMode: "apply_patch" }),
 			),
 		).toBe("apply_patch");
 	});
 
-	test("keeps strict edit mode ahead of the Kimi fallback", () => {
+	test("keeps strict edit mode ahead of the test fallback", () => {
 		delete Bun.env.PI_EDIT_VARIANT;
 		Bun.env.PI_STRICT_EDIT_MODE = "1";
 
-		expect(resolveEditMode(createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct" }))).toBe(
+		expect(resolveEditMode(createSession({ activeModel: "test/test-model-3" }))).toBe(
 			"hashline",
 		);
 	});

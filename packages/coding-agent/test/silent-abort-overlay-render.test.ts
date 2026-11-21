@@ -2,7 +2,7 @@ import { agentTranscriptSource } from "@oh-my-pi/pi-coding-agent/modes/agent-hub
 /**
  * Regression: the agent-hub chat transcript must not render SILENT_ABORT_MARKER verbatim.
  *
- * Codex review flagged that the old observer overlay rendered `errorMessage`
+ * Review flagged that the old observer overlay rendered `errorMessage`
  * without filtering the silent-abort sentinel; the hub chat view now renders
  * assistant messages through AssistantMessageComponent. This test exercises the
  * full chat-rebuild path through a real JSONL session file and an isolated
@@ -104,9 +104,9 @@ describe("Agent hub silent-abort regression", () => {
 				message: {
 					role: "assistant",
 					content: [],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-sonnet-4-5",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					stopReason: "aborted",
 					errorMessage: SILENT_ABORT_MARKER,
 					usage: {
@@ -161,9 +161,9 @@ describe("Agent hub silent-abort regression", () => {
 				message: {
 					role: "assistant",
 					content: [],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-sonnet-4-5",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					stopReason: "aborted",
 					errorId: AIError.create(AIError.Flag.SilentAbort),
 					usage: {
@@ -213,9 +213,9 @@ describe("Agent hub silent-abort regression", () => {
 				message: {
 					role: "assistant",
 					content: [],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-sonnet-4-5",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					stopReason: "error",
 					errorMessage: "Connection timed out",
 					usage: {

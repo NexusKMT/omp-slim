@@ -33,8 +33,8 @@ function makeMessage(content: AssistantMessage["content"]): AssistantMessage {
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: makeUsage(),
 		stopReason: "stop",
@@ -493,7 +493,7 @@ describe("frame-skip coalescing", () => {
 	});
 
 	it("detects an in-place block rewrite of the snapped tool-boundary content", () => {
-		// OpenAI Responses reuses the cumulative output object and can replace
+		// The responses API reuses the cumulative output object and can replace
 		// streamed text with authoritative terminal content in place. Aliasing the
 		// snapped array would compare it to itself and keep the stale text; an
 		// immutable snapshot must still repaint even when the rewrite has the same

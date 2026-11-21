@@ -4,9 +4,9 @@ import type { Context, FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-ai/build";
 
 // Issue #9433: the openai-completions consumer threw
-// `OpenAI completions stream closed before a finish_reason was received` whenever
+// `Completions stream closed before a finish_reason was received` whenever
 // a stream ended after emitting content without a truthy `finish_reason`. Many
-// OpenAI-compatible hosts stream content, then terminate with the `[DONE]`
+// compatible hosts stream content, then terminate with the `[DONE]`
 // sentinel while omitting (or `null`ing) `finish_reason`. `[DONE]` is the
 // streaming protocol's terminal signal, so those turns completed by server
 // agreement and must finalize cleanly; only a genuine transport EOF (no `[DONE]`)
@@ -42,7 +42,7 @@ async function run(frames: readonly unknown[]) {
 }
 
 describe("issue #9433 — [DONE]-terminated completions without finish_reason", () => {
-	// Each shape is a real OpenAI-compatible host behavior that previously threw
+	// Each shape is a real compatible host behavior that previously threw
 	// incomplete-stream; all three reach `[DONE]` and must finalize as a clean stop.
 	const doneTerminated: readonly (readonly [string, readonly unknown[], string])[] = [
 		[

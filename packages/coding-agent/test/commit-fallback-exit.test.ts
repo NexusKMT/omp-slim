@@ -21,7 +21,7 @@ let authStorage: AuthStorage | undefined;
 
 function mockModelResolution() {
 	const model = createTestModel({ provider: "test", id: "test-model" });
-	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
+	if (!model) throw new Error("Expected test-model model to exist");
 	vi.spyOn(sdkModule, "loadCliExtensionProviders").mockResolvedValue(undefined);
 	vi.spyOn(modelSelection, "resolvePrimaryModel").mockResolvedValue({
 		model: { name: "test-primary", provider: "test", id: "test" } as never,

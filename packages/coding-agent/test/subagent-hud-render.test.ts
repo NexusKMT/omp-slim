@@ -125,8 +125,8 @@ describe("subagent HUD lines", () => {
 					description: "Inspect rendering",
 					progress: makeProgress({
 						id: "HiddenBadge",
-						resolvedModel: "openai/gpt-5:high",
-						resolvedModelIdentity: "openai/gpt-5",
+						resolvedModel: "test/test-model:high",
+						resolvedModelIdentity: "test/test-model",
 						resolvedThinkingLevel: ThinkingLevel.High,
 					}),
 				}),
@@ -134,7 +134,7 @@ describe("subagent HUD lines", () => {
 			cfgTaskShowResolvedModelBadge.override(Settings.instance, false);
 			const disabled = render(sessions);
 			expect(disabled).toContain(`${theme.status.running} HiddenBadge: Inspect rendering`);
-			expect(disabled).not.toContain("openai/gpt-5");
+			expect(disabled).not.toContain("test/test-model");
 			resetSettingsForTest();
 			expect(render(sessions)).toBe(disabled);
 		});

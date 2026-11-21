@@ -25,8 +25,8 @@ function assistantStopMessage(text: string, totalTokens = 0): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "openai-responses",
-		provider: "openai",
+		api: "openai-completions",
+		provider: "test",
 		model: "mock",
 		usage: {
 			input: 0,

@@ -30,9 +30,9 @@ function reply(text: string, timestamp: number): SessionMessageEntryLike {
 	const message: AssistantMessage = {
 		role: "assistant",
 		content: [{ type: "text", text }],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		stopReason: "stop",
 		usage: {
 			input: 0,

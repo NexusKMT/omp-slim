@@ -109,13 +109,13 @@ describe("plugin extension discovery", () => {
 					onEvent("pi:model-adapter/register", payload => {
 						received = payload;
 					});
-					emitEvent("pi:model-adapter/register", { id: "gemini-acp" });
-					if (received?.id !== "gemini-acp") {
+					emitEvent("pi:model-adapter/register", { id: "test-acp" });
+					if (received?.id !== "test-acp") {
 						throw new Error("detached pi.events.emit/on did not deliver payload");
 					}
 					clearEvents();
 					emitEvent("pi:model-adapter/register", { id: "after-clear" });
-					if (received?.id !== "gemini-acp") {
+					if (received?.id !== "test-acp") {
 						throw new Error("detached pi.events.clear did not clear listeners");
 					}
 				}

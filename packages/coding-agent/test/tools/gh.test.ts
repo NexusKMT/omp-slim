@@ -577,11 +577,11 @@ describe("github tool", () => {
 		await expect(
 			tool.execute("file-read", {
 				op: "file_read",
-				repo: "openai/codex",
+				repo: "acme/widgets",
 				branch: "main",
 				path: "Cargo.toml",
 			}),
-		).rejects.toThrow("GitHub file read failed for 'openai/codex@main:Cargo.toml': gh: Not Found (HTTP 404)");
+		).rejects.toThrow("GitHub file read failed for 'acme/widgets@main:Cargo.toml': gh: Not Found (HTTP 404)");
 	});
 
 	it("returns GitHub images as model image content", async () => {
@@ -590,14 +590,14 @@ describe("github tool", () => {
 			encoding: "base64",
 			size: Buffer.byteLength(TINY_PNG_BASE64, "base64"),
 			content: TINY_PNG_BASE64,
-			html_url: "https://github.com/anomalyco/opencode/blob/main/packages/web/src/assets/lander/screenshot.png",
+			html_url: "https://github.com/acme/example/blob/main/packages/web/src/assets/lander/screenshot.png",
 		});
 		const tool = new GithubTool(
 			createSession("/tmp/test", Settings.isolated({ "github.enabled": true, "images.autoResize": false })),
 		);
 		const result = await tool.execute("file-read", {
 			op: "file_read",
-			repo: "anomalyco/opencode",
+			repo: "acme/example",
 			branch: "main",
 			path: "packages/web/src/assets/lander/screenshot.png",
 		});
@@ -612,7 +612,7 @@ describe("github tool", () => {
 	});
 
 	it("identifies files GitHub returns without inline bytes", async () => {
-		const sourceUrl = "https://github.com/anomalyco/opencode/blob/main/packages/web/src/assets/lander/screenshot.png";
+		const sourceUrl = "https://github.com/acme/example/blob/main/packages/web/src/assets/lander/screenshot.png";
 		vi.spyOn(github, "json").mockResolvedValue({
 			type: "file",
 			encoding: "none",
@@ -622,7 +622,7 @@ describe("github tool", () => {
 		const tool = new GithubTool(createSession());
 		const result = await tool.execute("file-read", {
 			op: "file_read",
-			repo: "anomalyco/opencode",
+			repo: "acme/example",
 			branch: "main",
 			path: "packages/web/src/assets/lander/screenshot.png",
 		});

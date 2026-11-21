@@ -32,8 +32,8 @@ describe("fuzzy scoring with a shadowed occurrence", () => {
 	});
 
 	it("keeps the multi-word phrase bonus when an earlier occurrence is mid-word", () => {
-		const plain = fuzzyMatch("gpt 5", "gpt 5");
-		const shadowed = fuzzyMatch("gpt 5", "xgpt 5x gpt 5");
+		const plain = fuzzyMatch("model 5", "model 5");
+		const shadowed = fuzzyMatch("model 5", "xmodel 5x model 5");
 
 		expect(plain.matches).toBe(true);
 		expect(shadowed.matches).toBe(true);

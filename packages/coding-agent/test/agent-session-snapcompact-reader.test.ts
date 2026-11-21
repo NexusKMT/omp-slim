@@ -1,9 +1,9 @@
 /**
  * A snapcompact archive is rendered for the model that compacted, and the
  * model reading it later may differ:
- * - The archive keeps its `¶think:` sections and reasoning legend. Claude
+ * - The archive keeps its `¶think:` sections and reasoning legend. The provider
  *   refuses requests that replay them (`reasoning_extraction`), so whatever
- *   brings a Claude model to such an archive (a model switch, a resume, a side
+ *   brings a provider model to such an archive (a model switch, a resume, a side
  *   request) must send the archive's no-reasoning view.
  * - A model without image input reads frames as image-omitted placeholders, so
  *   it must get the archive's kept text in place of the frames.
@@ -36,8 +36,8 @@ function bundled(provider: string, modelId: string): Model {
 	return model;
 }
 
-const gpt = bundled("openai", "gpt-5.4");
-const claude = bundled("anthropic", "claude-opus-5-5");
+const testModel = bundled("test", "test-model");
+const testModel2 = bundled("test", "test-model-2");
 
 function assistant(model: Model, content: AssistantMessage["content"]): AssistantMessage {
 	return {
@@ -64,7 +64,7 @@ function archivedTurns(): Message[] {
 	const filler = "the quick brown fox jumps over the lazy dog. ".repeat(20);
 	return Array.from({ length: 40 }, (_, i) => [
 		{ role: "user" as const, content: `turn ${i}: ${filler}`, timestamp: Date.now() },
-		assistant(gpt, [
+		assistant(testModel, [
 			{ type: "thinking", thinking: `${REASONING} ${i}: ${filler}\n\n${REASONING} ${i} continued: ${filler}` },
 			{ type: "text", text: `reply ${i}: ${filler}` },
 		]),
@@ -128,7 +128,7 @@ describe("snapcompact archive read by another model", () => {
 		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
-	/** Appends an archive rendered under GPT (reasoning included) and a kept reply; `withoutMethod`
+	/** Appends an archive rendered under the provider (reasoning included) and a kept reply; `withoutMethod`
 	 *  records it as a legacy or extension-provided entry would, with no method, and `summary`
 	 *  stands in for one an extension wrote over the archive. */
 	async function seedArchive(
@@ -151,7 +151,7 @@ describe("snapcompact archive read by another model", () => {
 			preserveData: archive.preserveData,
 			...(withoutMethod ? {} : { method: "snapcompact" }),
 		});
-		sessionManager.appendMessage(assistant(gpt, [{ type: "text", text: "Kept reply." }]));
+		sessionManager.appendMessage(assistant(testModel, [{ type: "text", text: "Kept reply." }]));
 		return archive;
 	}
 
@@ -222,12 +222,12 @@ describe("snapcompact archive read by another model", () => {
 		});
 	}
 
-	it("sends the no-reasoning variant on resume under Claude, persisted beside the original", async () => {
+	it("sends the no-reasoning variant on resume under the provider, persisted beside the original", async () => {
 		const cwd = path.join(tempDir, "resume");
 		const sessionDir = path.join(cwd, "sessions");
 		const sessionManager = SessionManager.create(cwd, sessionDir);
 		const original = await seedArchive(sessionManager);
-		const { session, mock } = startSession(sessionManager, claude);
+		const { session, mock } = startSession(sessionManager, testModel2);
 
 		await session.prompt("Continue.");
 		const variantFrames = expectVariantSent(sessionManager, original, mock.calls[0]?.context);
@@ -250,7 +250,7 @@ describe("snapcompact archive read by another model", () => {
 			suppressBreadcrumb: true,
 		});
 		const render = vi.spyOn(snapcompact, "compact");
-		const resumed = startSession(resumedManager, claude);
+		const resumed = startSession(resumedManager, testModel2);
 		await resumed.session.prompt("Continue.");
 		expect(render).not.toHaveBeenCalled();
 		expectVariantSent(resumedManager, original, resumed.mock.calls[0]?.context, variantFrames);
@@ -259,10 +259,10 @@ describe("snapcompact archive read by another model", () => {
 	it("sends text without reasoning and no frames when the variant cannot be rendered", async () => {
 		const sessionManager = SessionManager.inMemory();
 		const original = await seedArchive(sessionManager);
-		const { session, mock } = startSession(sessionManager, gpt);
+		const { session, mock } = startSession(sessionManager, testModel);
 		vi.spyOn(snapcompact, "compact").mockRejectedValue(new Error("renderer unavailable"));
 
-		await session.setModel(claude);
+		await session.setModel(testModel2);
 		await session.prompt("Continue.");
 
 		const { text, images } = requestContent(mock.calls[0]?.context.messages);
@@ -280,7 +280,7 @@ describe("snapcompact archive read by another model", () => {
 	it("checks only messages appended since the previous model call of a tool loop", async () => {
 		const sessionManager = SessionManager.inMemory();
 		const original = await seedArchive(sessionManager);
-		const { session, mock } = startSession(sessionManager, claude);
+		const { session, mock } = startSession(sessionManager, testModel2);
 		const summaryChecks = vi.spyOn(snapcompact, "summaryIncludesThinking");
 		const checksAtCall: number[] = [];
 		for (let call = 0; call < 4; call++) {
@@ -302,17 +302,17 @@ describe("snapcompact archive read by another model", () => {
 	});
 
 	// An extension or custom template may write its own summary over a snapcompact archive, without
-	// the `¶think:` legend, while the archive's kept source still carries GPT's reasoning. The fact it
+	// the `¶think:` legend, while the archive's kept source still carries the provider's reasoning. The fact it
 	// alone holds must survive the swap.
 	const EXTENSION_FACT = "deployment is paused";
 	const EXTENSION_SUMMARY = `Earlier work, summarized by an extension: ${EXTENSION_FACT}.`;
 
-	it("sends Claude no reasoning from an archive whose summary declares none, keeping that summary", async () => {
+	it("sends the provider no reasoning from an archive whose summary declares none, keeping that summary", async () => {
 		const sessionManager = SessionManager.inMemory();
 		const original = await seedArchive(sessionManager, { summary: EXTENSION_SUMMARY });
-		const { session, mock } = startSession(sessionManager, gpt);
+		const { session, mock } = startSession(sessionManager, testModel);
 
-		await session.setModel(claude);
+		await session.setModel(testModel2);
 		await session.prompt("Continue.");
 		const { text, images } = requestContent(mock.calls[0]?.context.messages);
 		expect(text).toContain(EXTENSION_FACT);
@@ -330,8 +330,8 @@ describe("snapcompact archive read by another model", () => {
 		const sessionManager = SessionManager.inMemory();
 		const original = await seedArchive(sessionManager, { summary: EXTENSION_SUMMARY });
 		const archive = snapcompact.getPreservedArchive(original.preserveData)!;
-		const textOnlyClaude: Model = { ...claude, input: ["text"] };
-		const { session, mock } = startSession(sessionManager, textOnlyClaude);
+		const textOnlyTestModel2: Model = { ...testModel2, input: ["text"] };
+		const { session, mock } = startSession(sessionManager, textOnlyTestModel2);
 
 		await session.prompt("Continue.");
 		const { text, images } = requestContent(mock.calls[0]?.context.messages);

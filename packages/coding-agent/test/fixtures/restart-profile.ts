@@ -35,7 +35,7 @@ if (process.argv[2] === "receive") {
 	await Settings.init({ inMemory: true, cwd: process.cwd() });
 	const authStorage = await AuthStorage.create(path.join(process.cwd(), "auth.db"));
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "anthropic", id: "test-model" });
 	const sessionManager = SessionManager.create(process.cwd());
 	sessionManager.appendMessage({ role: "user", content: "profile restart marker", timestamp: Date.now() });
 	await sessionManager.ensureOnDisk();

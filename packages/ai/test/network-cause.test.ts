@@ -65,17 +65,17 @@ describe("classifyNetworkCause", () => {
 		});
 
 		expect(AIError.classifyNetworkCause(err)?.kind).toBe("tls");
-		expect(AIError.networkFailureMessage(err, "https://api.openai.com/v1/responses")).toBe(
-			"TLS certificate verification failed for api.openai.com (UNABLE_TO_VERIFY_LEAF_SIGNATURE). If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
+		expect(AIError.networkFailureMessage(err, "https://api.example.invalid/v1/responses")).toBe(
+			"TLS certificate verification failed for api.example.invalid (UNABLE_TO_VERIFY_LEAF_SIGNATURE). If you're behind a TLS-inspecting proxy, its CA may need to be trusted.",
 		);
 	});
 
 	it("classifies a flattened message-only errno (fetchWithRetry drops the cause)", () => {
-		expect(AIError.classifyNetworkCause(new Error("Network error: getaddrinfo ENOTFOUND api.openai.com"))).toEqual({
+		expect(AIError.classifyNetworkCause(new Error("Network error: getaddrinfo ENOTFOUND api.example.invalid"))).toEqual({
 			kind: "unreachable",
 			code: undefined,
 			detail: "getaddrinfo ENOTFOUND",
-			host: "api.openai.com",
+			host: "api.example.invalid",
 		});
 	});
 
@@ -109,7 +109,7 @@ describe("classifyNetworkCause", () => {
 	it("leaves non-network errors alone", () => {
 		for (const err of [new Error("Overloaded"), new TypeError("fetch failed")]) {
 			expect(AIError.classifyNetworkCause(err)).toBeUndefined();
-			expect(AIError.networkFailureError(err, "https://api.openai.com/v1/responses")).toBe(err);
+			expect(AIError.networkFailureError(err, "https://api.example.invalid/v1/responses")).toBe(err);
 			expect(AIError.networkFailureMessage(err)).toBeUndefined();
 		}
 	});
@@ -154,7 +154,7 @@ describe("network failure classification flags", () => {
 		}
 
 		// Flattened runtime text (no sentence) must stay retryable too.
-		for (const message of [OFFLINE_ENDPOINT, "getaddrinfo ENOTFOUND api.openai.com", "FailedToOpenSocket"]) {
+		for (const message of [OFFLINE_ENDPOINT, "getaddrinfo ENOTFOUND api.example.invalid", "FailedToOpenSocket"]) {
 			expect(AIError.isProviderRetryableError(new Error(message))).toBe(true);
 			expect(AIError.is(AIError.classify(new Error(message)), AIError.Flag.Transient)).toBe(true);
 		}
@@ -163,13 +163,13 @@ describe("network failure classification flags", () => {
 
 describe("postOpenAIStream transport rejection", () => {
 	it("names the host and cause instead of the runtime's bare DNS text", async () => {
-		const networkError = bunDnsFailure("api.openai.com");
+		const networkError = bunDnsFailure("api.example.invalid");
 		const fetchImpl: FetchImpl = async () => {
 			throw networkError;
 		};
 
 		const error = await postOpenAIStream({
-			url: "https://api.openai.com/v1/chat/completions",
+			url: "https://api.example.invalid/v1/chat/completions",
 			headers: {},
 			body: {},
 			signal: new AbortController().signal,
@@ -182,7 +182,7 @@ describe("postOpenAIStream transport rejection", () => {
 
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toBe(
-			"No internet connection: couldn't reach api.openai.com (getaddrinfo ETIMEOUT). Check your network or proxy and try again.",
+			"No internet connection: couldn't reach api.example.invalid (getaddrinfo ETIMEOUT). Check your network or proxy and try again.",
 		);
 		expect((error as Error).cause).toBe(networkError);
 	});

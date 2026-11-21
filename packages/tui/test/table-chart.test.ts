@@ -68,14 +68,14 @@ const TRANSITIONS = `| Config | out tokens r5 → r6 |
 | sol:med | 2,456 → 2,544 |
 | sol:high | 4,100 → 3,900 |`;
 
-const RUNS = `| Run | gemini | haiku |
+const RUNS = `| Run | test-model-1 | test-model-2 |
 |---|---|---|
 | Run 1 | 58.3 | 66.7 |
 | Run 2 | 58.3 | 66.7 |
 | Run 3 | 66.7 | 66.7 |
 | Run 4 | 50.0 | 58.3 |`;
 
-const METRICS = `| Metric | Gemini 3 Flash | Grok Code Fast 1 | Kimi |
+const METRICS = `| Metric | Test Model C | Test Model B | Test Model G |
 |---|---|---|---|
 | Success rate | 50.0% | 65.0% | 70% |
 | Edit calls | 275 | 198 | 240 |
@@ -84,10 +84,10 @@ const METRICS = `| Metric | Gemini 3 Flash | Grok Code Fast 1 | Kimi |
 
 const DELTAS = `| Model | Δ pass rate |
 |---|---|
-| Sonnet 4.5 | +14.4pp |
-| GLM-4.5 Air | +20.0pp |
-| Haiku 4.5 | +5.4pp |
-| GPT-5.1 Codex Mini | -33pp |`;
+| Test Model D | +14.4pp |
+| Test Model E | +20.0pp |
+| Test Model F | +5.4pp |
+| Test Model A | -33pp |`;
 
 const MATRIX = `| Area | run1 | run2 | run3 | run4 |
 |---|---|---|---|---|
@@ -132,22 +132,22 @@ const ARROW_METRICS = `| Metric | r5 → r6 |
 // Rows told apart only by a second text column; the `Notes` column is unique too but describes rather than names.
 const NESTED = `| Model | Harness | Notes | Input | Cached | Output | Reasoning |
 |---|---|---|---|---|---|---|
-| Sonnet 5.5 | baseline | first pass | 104k | 91.6k | 7.0k | 0 |
-| Sonnet 5.5 | bash | retried once | 49.5k | 38.7k | 5.1k | 0 |
-| Sonnet 5.5 | http | clean | 98.2k | 83.7k | 6.1k | 0 |
-| GPT-6-Luna | baseline | clean run | 45.2k | 30.9k | 3.1k | 0.6k |
-| GPT-6-Luna | bash | slow | 15.5k | 7.2k | 2.7k | 0.7k |
-| GPT-6-Luna | http | fast | 41.1k | 27.8k | 3.2k | 0.8k |`;
+| Test Model H | baseline | first pass | 104k | 91.6k | 7.0k | 0 |
+| Test Model H | bash | retried once | 49.5k | 38.7k | 5.1k | 0 |
+| Test Model H | http | clean | 98.2k | 83.7k | 6.1k | 0 |
+| Test Model I | baseline | clean run | 45.2k | 30.9k | 3.1k | 0.6k |
+| Test Model I | bash | slow | 15.5k | 7.2k | 2.7k | 0.7k |
+| Test Model I | http | fast | 41.1k | 27.8k | 3.2k | 0.8k |`;
 
 // Input = Cached + Uncached input, Total = Input + Output: the values prove the parts.
 const TOKENS = `| Model | Harness | Input | Cached | Uncached input | Output | Reasoning | Total |
 |---|---|---|---|---|---|---|---|
-| Sonnet 5.5 | baseline | 104k | 91.6k | 12.4k | 7.0k | 0 | 111k |
-| Sonnet 5.5 | bash | 49.5k | 38.7k | 10.8k | 5.1k | 0 | 54.6k |
-| Sonnet 5.5 | http | 98.2k | 83.7k | 14.5k | 6.1k | 0 | 104k |
-| GPT-6-Luna | baseline | 45.2k | 30.9k | 14.3k | 3.1k | 0.6k | 48.2k |
-| GPT-6-Luna | bash | 15.5k | 7.2k | 8.3k | 2.7k | 0.7k | 18.2k |
-| GPT-6-Luna | http | 41.1k | 27.8k | 13.3k | 3.2k | 0.8k | 44.3k |`;
+| Test Model H | baseline | 104k | 91.6k | 12.4k | 7.0k | 0 | 111k |
+| Test Model H | bash | 49.5k | 38.7k | 10.8k | 5.1k | 0 | 54.6k |
+| Test Model H | http | 98.2k | 83.7k | 14.5k | 6.1k | 0 | 104k |
+| Test Model I | baseline | 45.2k | 30.9k | 14.3k | 3.1k | 0.6k | 48.2k |
+| Test Model I | bash | 15.5k | 7.2k | 8.3k | 2.7k | 0.7k | 18.2k |
+| Test Model I | http | 41.1k | 27.8k | 13.3k | 3.2k | 0.8k | 44.3k |`;
 
 const CI_STEPS = `| Step | Duration | Notes |
 |---|---|---|
@@ -193,17 +193,17 @@ const STATUSES = `| | count | |
 
 const OUTCOMES = `| Input | ok | fail |
 |---|---|---|
-| request anthropic-messages | 340 | 40 |
-| request openai-chat | 279 | 1 |
-| request openai-responses | 327 | 9 |
-| request gemini (harvested) | 20 | 0 |`;
+| request test-messages | 340 | 40 |
+| request test-chat | 279 | 1 |
+| request test-responses | 327 | 9 |
+| request test-model-1 (harvested) | 20 | 0 |`;
 
 const STAGES = `| Model | Baseline | Best (Iter 3) | Iter 4 |
 |---|---|---|---|
-| kimi | 7 | 3 | 6 |
-| haiku | 2 | 2 | 2 |
-| gemini | 3 | 2 | 2 |
-| glm | 8 | 2 | 2 |`;
+| test-model-3 | 7 | 3 | 6 |
+| test-model-2 | 2 | 2 | 2 |
+| test-model-1 | 3 | 2 | 2 |
+| test-model-4 | 8 | 2 | 2 |`;
 
 const DIFF = `| Part | Files | Added | Removed |
 |---|---|---|---|
@@ -366,7 +366,7 @@ describe("analyzeTable", () => {
 	// Regression: `25.0 / 27.8` pairs read as fractions beside single values, so the single-value rows drew no bars.
 	it("splits rows whose name and cells list the same pair, keeping single-value rows on the axis", () => {
 		const arms = analyze(
-			"| Model | Arm | Tests passed | Turns |\n|---|---|---|---|\n| Luna | bash | 27.0 | 6.0 |\n| Luna | pager 24×80 / 48×120 | 25.0 / 27.8 | 12.6 / 9.4 |\n| Sonnet | bash | 26.2 | 8.0 |",
+			"| Model | Arm | Tests passed | Turns |\n|---|---|---|---|\n| Test Model K | bash | 27.0 | 6.0 |\n| Test Model K | pager 24×80 / 48×120 | 25.0 / 27.8 | 12.6 / 9.4 |\n| Test Model J | bash | 26.2 | 8.0 |",
 		);
 		expect(arms.columns[1]!.cells.map(cell => cell.text)).toEqual(["bash", "pager 24×80", "pager 48×120", "bash"]);
 		expect(arms.measures.map(column => column.cells.map(cell => cell.kind === "number" && cell.value))).toEqual([
@@ -496,7 +496,7 @@ describe("planChart", () => {
 
 	it("plots one of two columns that restate each other", () => {
 		const arms = analyze(
-			"| arm | pass | pass% | $/task |\n|---|---|---|---|\n| opus48 | 33/38 | 87% | $2.82 |\n| n12 | 27/38 | 71% | $1.30 |\n| n8 | 25/38 | 66% | $1.24 |\n| haiku | 14/38 | 37% | $0.72 |",
+			"| arm | pass | pass% | $/task |\n|---|---|---|---|\n| test-model-48 | 33/38 | 87% | $2.82 |\n| n12 | 27/38 | 71% | $1.30 |\n| n8 | 25/38 | 66% | $1.24 |\n| test-model-2 | 14/38 | 37% | $0.72 |",
 		);
 		expect(arms.measures.map(column => column.header)).toEqual(["pass", "$/task"]);
 	});
@@ -504,7 +504,7 @@ describe("planChart", () => {
 	it("transposes metric-per-row tables so each metric keeps its own unit", () => {
 		const analysis = analyze(METRICS);
 		const spec = buildChart(analysis, planChart(analysis)!)!;
-		expect(spec.categories).toEqual(["Gemini 3 Flash", "Grok Code Fast 1", "Kimi"]);
+		expect(spec.categories).toEqual(["Test Model C", "Test Model B", "Test Model G"]);
 		expect(spec.series.map(series => [series.name, series.dim])).toEqual([
 			["Success rate", "percent"],
 			["Edit calls", "count"],
@@ -555,34 +555,34 @@ describe("planChart", () => {
 	it("names rows whose labels repeat by the column telling them apart, nesting the label's runs", () => {
 		const analysis = analyze(NESTED);
 		const spec = buildChart(analysis, planChart(analysis)!)!;
-		expect(spec.categories.slice(0, 2)).toEqual(["Sonnet 5.5 · baseline", "Sonnet 5.5 · bash"]);
+		expect(spec.categories.slice(0, 2)).toEqual(["Test Model H · baseline", "Test Model H · bash"]);
 		expect(spec.groups).toEqual([
-			{ name: "Sonnet 5.5", members: ["baseline", "bash", "http"] },
-			{ name: "GPT-6-Luna", members: ["baseline", "bash", "http"] },
+			{ name: "Test Model H", members: ["baseline", "bash", "http"] },
+			{ name: "Test Model I", members: ["baseline", "bash", "http"] },
 		]);
 
 		// Interleaved labels: the other naming column runs in blocks, so it nests instead; table order stays.
 		const interleaved = analyze(
-			"| Model | Harness | Tokens |\n|---|---|---|\n| Sonnet | baseline | 111k |\n| Luna | baseline | 48k |\n| Sonnet | bash | 55k |\n| Luna | bash | 18k |",
+			"| Model | Harness | Tokens |\n|---|---|---|\n| Test Model J | baseline | 111k |\n| Test Model K | baseline | 48k |\n| Test Model J | bash | 55k |\n| Test Model K | bash | 18k |",
 		);
 		const byHarness = buildChart(interleaved, planChart(interleaved)!)!;
-		expect(byHarness.categories).toEqual(["Sonnet · baseline", "Luna · baseline", "Sonnet · bash", "Luna · bash"]);
+		expect(byHarness.categories).toEqual(["Test Model J · baseline", "Test Model K · baseline", "Test Model J · bash", "Test Model K · bash"]);
 		expect(byHarness.groups?.map(group => group.name)).toEqual(["baseline", "bash"]);
 
 		// No column runs in blocks: flat joined names, no nesting.
 		const scattered = analyze(
-			"| Model | Harness | Tokens |\n|---|---|---|\n| Sonnet | baseline | 111k |\n| Luna | bash | 48k |\n| Sonnet | bash | 55k |\n| Luna | baseline | 18k |",
+			"| Model | Harness | Tokens |\n|---|---|---|\n| Test Model J | baseline | 111k |\n| Test Model K | bash | 48k |\n| Test Model J | bash | 55k |\n| Test Model K | baseline | 18k |",
 		);
 		const flat = buildChart(scattered, planChart(scattered)!)!;
-		expect(flat.categories).toEqual(["Sonnet · baseline", "Luna · bash", "Sonnet · bash", "Luna · baseline"]);
+		expect(flat.categories).toEqual(["Test Model J · baseline", "Test Model K · bash", "Test Model J · bash", "Test Model K · baseline"]);
 		expect(flat.groups).toBeUndefined();
 
 		// A plan's group regroups interleaved rows by first appearance, table order within each group.
 		const byModel = buildChart(scattered, { ...planChart(scattered)!, group: 0 })!;
-		expect(byModel.categories).toEqual(["Sonnet · baseline", "Sonnet · bash", "Luna · bash", "Luna · baseline"]);
+		expect(byModel.categories).toEqual(["Test Model J · baseline", "Test Model J · bash", "Test Model K · bash", "Test Model K · baseline"]);
 		expect(byModel.groups).toEqual([
-			{ name: "Sonnet", members: ["baseline", "bash"] },
-			{ name: "Luna", members: ["bash", "baseline"] },
+			{ name: "Test Model J", members: ["baseline", "bash"] },
+			{ name: "Test Model K", members: ["bash", "baseline"] },
 		]);
 	});
 
@@ -627,7 +627,7 @@ describe("renderChartSvg", () => {
 	it("writes a repeated row name once per group", () => {
 		const analysis = analyze(NESTED);
 		const svg = renderChartSvg(buildChart(analysis, { ...planChart(analysis)!, shading: "shared" })!);
-		expect(svg.match(/>Sonnet 5\.5</g)).toHaveLength(1);
+		expect(svg.match(/>Test Model H</g)).toHaveLength(1);
 		expect(svg.match(/>bash</g)).toHaveLength(2);
 	});
 
@@ -749,9 +749,9 @@ describe("table charts in assistant Markdown", () => {
 			const message: AssistantMessage = {
 				role: "assistant",
 				content: [{ type: "text", text: answer }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-sonnet-4-5",
+				api: "openai-completions",
+				provider: "test",
+				model: "test-model",
 				stopReason: "stop",
 				usage: {
 					input: 0,
@@ -799,9 +799,9 @@ describe("table charts in assistant Markdown", () => {
 						{
 							role: "assistant",
 							content: [{ type: "text", text: text.slice(0, end) }],
-							api: "anthropic-messages",
-							provider: "anthropic",
-							model: "claude-sonnet-4-5",
+							api: "openai-completions",
+							provider: "test",
+							model: "test-model",
 							stopReason: "stop",
 							usage: {
 								input: 0,

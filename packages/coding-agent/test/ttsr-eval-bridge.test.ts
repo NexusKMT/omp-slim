@@ -21,7 +21,7 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const authStorage: AuthStorage = createInMemoryAuthStorage();
-for (const provider of ["anthropic", "mock"]) authStorage.keys.setRuntime(provider, "test-key");
+for (const provider of ["test", "mock"]) authStorage.keys.setRuntime(provider, "test-key");
 const modelRegistry = new ModelRegistry(authStorage);
 
 afterAll(() => {

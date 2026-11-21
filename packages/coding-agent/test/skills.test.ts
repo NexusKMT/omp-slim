@@ -157,11 +157,11 @@ describe("skills", () => {
 		});
 
 		// Regression for issue #2401: a user who disables the named third-party
-		// CLI toggles (codex/claude/native) MUST still see skills from the
+		// CLI toggles (test/third-party/native) MUST still see skills from the
 		// canonical OMP-native `~/.agent[s]/skills` (the `agents` provider).
 		// Pre-fix `loadSkills` gated `agents` on `anyBuiltInSkillSourceEnabled`,
 		// so flipping the five third-party toggles off silently disabled it.
-		it("should still load ~/.agents/skills when codex/claude/native toggles are off (#2401)", async () => {
+		it("should still load ~/.agents/skills when test/third-party/native toggles are off (#2401)", async () => {
 			const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-agents-home-"));
 			const tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-agents-cwd-"));
 			const skillDir = path.join(tempHome, ".agents", "skills", "user-agents-skill");
@@ -289,19 +289,19 @@ describe("skills", () => {
 		});
 
 		// Regression for PR #2405 review: the fall-through gate used by
-		// unknown third-party providers (opencode/github/claude-plugins/...)
+		// unknown third-party providers (test/github/claude-plugins/...)
 		// MUST NOT consider the OMP-native `enableAgentsUser`/`...Project`
-		// toggles. Otherwise a user who disables Codex/Claude/Pi to silence
+		// toggles. Otherwise a user who disables third-party providers to silence
 		// third-party CLI noise but keeps the default agents toggles on still
-		// sees opencode skills resurface via the fallback branch.
+		// sees third-party skills resurface via the fallback branch.
 		it("does not re-enable third-party providers via the agents toggles (PR #2405)", async () => {
-			const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-opencode-home-"));
-			const tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-opencode-cwd-"));
-			const opencodeSkillDir = path.join(tempHome, ".config", "opencode", "skills", "leaked-opencode");
-			await fs.mkdir(opencodeSkillDir, { recursive: true });
+			const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "pi-thirdparty-home-"));
+			const tempCwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-thirdparty-cwd-"));
+			const thirdpartySkillDir = path.join(tempHome, ".config", "thirdparty", "skills", "leaked-provider");
+			await fs.mkdir(thirdpartySkillDir, { recursive: true });
 			await fs.writeFile(
-				path.join(opencodeSkillDir, "SKILL.md"),
-				["---", "description: Should be filtered by third-party gate", "---", "", "# leaked-opencode"].join("\n"),
+				path.join(thirdpartySkillDir, "SKILL.md"),
+				["---", "description: Should be filtered by third-party gate", "---", "", "# leaked-provider"].join("\n"),
 			);
 			const homedirSpy = spyOn(os, "homedir").mockReturnValue(tempHome);
 			try {
@@ -311,7 +311,7 @@ describe("skills", () => {
 					// enableAgentsUser / enableAgentsProject default true
 					cwd: tempCwd,
 				});
-				expect(skills.some(s => s.name === "leaked-opencode")).toBe(false);
+				expect(skills.some(s => s.name === "leaked-provider")).toBe(false);
 			} finally {
 				homedirSpy.mockRestore();
 				await removeWithRetries(tempHome);

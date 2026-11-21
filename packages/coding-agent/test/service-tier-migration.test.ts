@@ -15,13 +15,13 @@ import { createTestModel } from "./helpers/test-model";
 
 import { cfgTierOpenai, cfgTierSubagent } from "@oh-my-pi/pi-coding-agent/session/settings";
 
-function requiredBundledModel(provider: "openai-codex" | "anthropic" | "google", id: string) {
+function requiredBundledModel(provider: "test", id: string) {
 	const model = createTestModel({ provider: provider, id: id });
 	if (!model) throw new Error(`Expected bundled model ${provider}/${id}`);
 	return model;
 }
 
-const openAIModel = requiredBundledModel("openai-codex", "gpt-5.6-sol");
+const testModel = requiredBundledModel("test", "test-model");
 
 // Locks the back-compat migration of the legacy single `serviceTier` enum (with
 // scoped `openai-only`/`claude-only` sentinels) plus `serviceTierSubagent`/
@@ -61,7 +61,7 @@ describe("serviceTier → tier.* settings migration", () => {
 		expect(cfgTierOpenai.get(settings)).toBe("priority");
 	});
 
-	it("scopes openai-only/claude-only to a single family", async () => {
+	it("scopes family-specific service-tier sentinels to a single family", async () => {
 		const openai = await loadWith({ serviceTier: "openai-only" });
 		expect(cfgTierOpenai.get(openai)).toBe("priority");
 
@@ -69,7 +69,7 @@ describe("serviceTier → tier.* settings migration", () => {
 		expect(cfgTierOpenai.get(claude)).toBe("none");
 	});
 
-	it("maps plain OpenAI tiers onto the OpenAI family", async () => {
+	it("maps plain tiers onto the family", async () => {
 		const settings = await loadWith({ serviceTier: "flex" });
 		expect(cfgTierOpenai.get(settings)).toBe("flex");
 	});
@@ -83,16 +83,16 @@ describe("serviceTier → tier.* settings migration", () => {
 });
 
 describe("task.agentServiceTierOverrides", () => {
-	it("resolves every documented setting for the OpenAI family", () => {
+	it("resolves every documented setting for the family", () => {
 		const parentTiers: ServiceTierByFamily = { openai: "priority" };
 
-		expect(resolveAgentServiceTierOverride("inherit", openAIModel, parentTiers)).toEqual(parentTiers);
-		expect(resolveAgentServiceTierOverride("none", openAIModel, parentTiers)).toEqual({});
-		expect(resolveAgentServiceTierOverride("auto", openAIModel, parentTiers)).toEqual({ openai: "auto" });
-		expect(resolveAgentServiceTierOverride("default", openAIModel, parentTiers)).toEqual({ openai: "default" });
-		expect(resolveAgentServiceTierOverride("flex", openAIModel, parentTiers)).toEqual({ openai: "flex" });
-		expect(resolveAgentServiceTierOverride("scale", openAIModel, parentTiers)).toEqual({ openai: "scale" });
-		expect(resolveAgentServiceTierOverride("priority", openAIModel, parentTiers)).toEqual({ openai: "priority" });
+		expect(resolveAgentServiceTierOverride("inherit", testModel, parentTiers)).toEqual(parentTiers);
+		expect(resolveAgentServiceTierOverride("none", testModel, parentTiers)).toEqual({});
+		expect(resolveAgentServiceTierOverride("auto", testModel, parentTiers)).toEqual({ openai: "auto" });
+		expect(resolveAgentServiceTierOverride("default", testModel, parentTiers)).toEqual({ openai: "default" });
+		expect(resolveAgentServiceTierOverride("flex", testModel, parentTiers)).toEqual({ openai: "flex" });
+		expect(resolveAgentServiceTierOverride("scale", testModel, parentTiers)).toEqual({ openai: "scale" });
+		expect(resolveAgentServiceTierOverride("priority", testModel, parentTiers)).toEqual({ openai: "priority" });
 	});
 
 	it("rejects values outside the documented service-tier set during settings load", async () => {

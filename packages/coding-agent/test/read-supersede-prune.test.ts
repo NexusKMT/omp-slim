@@ -88,8 +88,8 @@ function readEntries(id: string, readPath: string, result: AgentToolResult<ReadT
 			message: {
 				role: "assistant",
 				content: [{ type: "toolCall", id, name: "read", arguments: { path: readPath } }],
-				api: "anthropic-messages",
-				provider: "anthropic",
+				api: "openai-completions",
+				provider: "test",
 				model: "test",
 				usage: {
 					input: 0,

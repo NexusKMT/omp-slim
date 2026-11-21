@@ -310,7 +310,7 @@ describe("Markdown component", () => {
 			expect(plainLines.some(line => line.includes("-"))).toBeTruthy();
 		});
 
-		it("recovers rich Markdown after a lone closing fence from Gemini", () => {
+		it("recovers rich Markdown after a lone closing fence from the provider", () => {
 			const markdown = new Markdown(
 				`=== PACED IP ROTATION SOAK RESULTS ===
 Total Queries: 20
@@ -2536,7 +2536,7 @@ describe("Markdown.render reference stability", () => {
 
 	it("formats common HTML tags inside table cells", () => {
 		const md = new Markdown(
-			"| Gemini result |\n| --- |\n| <ul><li>None. Static checks <br> are green.</li></ul> |",
+			"| Model result |\n| --- |\n| <ul><li>None. Static checks <br> are green.</li></ul> |",
 			0,
 			0,
 			defaultMarkdownTheme,

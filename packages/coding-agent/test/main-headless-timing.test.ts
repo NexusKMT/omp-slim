@@ -49,7 +49,7 @@ describe("startup timing after a headless runner starts", () => {
 		let recordedDuringPrompt: boolean | undefined;
 		const session = {
 			extensionRunner: undefined,
-			model: { provider: "anthropic", id: "test-model" },
+			model: { provider: "test", id: "test-model" },
 			settings: Settings.isolated(),
 			sessionManager: manager,
 			subscribe: () => {},

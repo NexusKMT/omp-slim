@@ -74,9 +74,9 @@ describe("SessionAnonymizer", () => {
 						},
 						{ type: "toolCall", id: "toolu_03XYZ9abcd", name: "read", arguments: { path: "agent://Probe" } },
 					],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-opus-5-5",
+					api: "openai-completions",
+					provider: "test",
+					model: "test-model",
 					usage,
 					elidedOutputTokens: 12,
 					stopReason: "toolUse",
@@ -122,7 +122,7 @@ describe("SessionAnonymizer", () => {
 				id: "e1b2c3d4",
 				parentId: "d1b2c3d4",
 				timestamp: "2026-09-22T15:12:07.000Z",
-				model: "claude-opus-5-5",
+				model: "test-model",
 				stopReason: "error",
 				errorMessage: "400 prompt contained password=hunter2 for user alice@example.com",
 			},
@@ -151,8 +151,8 @@ describe("SessionAnonymizer", () => {
 
 		expect(at(user, "message", "content", 0, "text")).toMatch(/^\[redacted #\d+: 28 chars, 1 line\]$/);
 		expect(at(assistant, "message")).toMatchObject({
-			model: "claude-opus-5-5",
-			provider: "anthropic",
+			model: "test-model",
+			provider: "test",
 			usage,
 			elidedOutputTokens: 12,
 			stopReason: "toolUse",
@@ -196,7 +196,7 @@ describe("SessionAnonymizer", () => {
 		const metadata = {
 			type: "session_init",
 			perCallModel: true,
-			perCallModelIdentity: "openrouter/anthropic/claude-sonnet-4-5@anthropic",
+			perCallModelIdentity: "test-gateway/test/test-model@test",
 			perCallThinkingLevel,
 		};
 

@@ -12,6 +12,6 @@ function scopedModel(id: string): ScopedModel {
 
 describe("buildModelScopeNotification", () => {
 	it("does not emit startup model scope chrome while startup.quiet is enabled", () => {
-		expect(buildModelScopeNotification([scopedModel("claude-sonnet-4-5")], true)).toBeNull();
+		expect(buildModelScopeNotification([scopedModel("test-model")], true)).toBeNull();
 	});
 });

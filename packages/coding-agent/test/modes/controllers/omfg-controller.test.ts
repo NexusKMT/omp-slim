@@ -68,9 +68,9 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 	return {
 		role: "assistant",
 		content,
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage,
 		stopReason: "stop",
 		timestamp: Date.now(),
@@ -104,7 +104,7 @@ async function createHarness(options: HarnessOptions): Promise<Harness> {
 	const showHookConfirm = vi.fn<ShowHookConfirm>(async () => options.confirmResult ?? true);
 	const showHookInput = vi.fn<ShowHookInput>(async () => options.inputChoice);
 	const session = {
-		model: options.hasModel === false ? undefined : { provider: "anthropic", id: "claude-sonnet-4-5" },
+		model: options.hasModel === false ? undefined : { provider: "test", id: "test-model" },
 		runEphemeralTurn: options.runEphemeralTurn,
 		messages: options.messages ?? [],
 		agent: { state: { tools: [] } },

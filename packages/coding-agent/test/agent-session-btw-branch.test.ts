@@ -23,9 +23,9 @@ function createBtwAssistant(): AssistantMessage {
 			{ type: "redactedThinking", data: "encrypted-side-channel-thinking" },
 			{ type: "text", text: "The fix is to branch the side answer." },
 		],
-		api: "anthropic-messages",
-		provider: "anthropic",
-		model: "claude-sonnet-4-5",
+		api: "openai-completions",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 1,
 			output: 2,
@@ -108,9 +108,9 @@ describe("AgentSession.branchFromBtw", () => {
 		activeSession.sessionManager.appendMessage({
 			role: "assistant",
 			content: [{ type: "text", text: "seed response" }],
-			api: "anthropic-messages",
-			provider: "anthropic",
-			model: "claude-sonnet-4-5",
+			api: "openai-completions",
+			provider: "test",
+			model: "test-model",
 			usage: {
 				input: 0,
 				output: 0,

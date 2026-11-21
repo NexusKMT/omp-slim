@@ -14,7 +14,7 @@ describe("parseArgs — --hide-thinking flag", () => {
 	it("parses --hide-thinking in any position", () => {
 		const result1 = parseArgs(["--hide-thinking", "prompt"]);
 		const result2 = parseArgs(["prompt", "--hide-thinking"]);
-		const result3 = parseArgs(["--model", "opus", "--hide-thinking", "prompt"]);
+		const result3 = parseArgs(["--model", "test-model", "--hide-thinking", "prompt"]);
 
 		expect(result1.hideThinking).toBe(true);
 		expect(result2.hideThinking).toBe(true);
@@ -22,9 +22,9 @@ describe("parseArgs — --hide-thinking flag", () => {
 	});
 
 	it("does not consume a value after --hide-thinking", () => {
-		const result = parseArgs(["--hide-thinking", "--model", "opus"]);
+		const result = parseArgs(["--hide-thinking", "--model", "test-model"]);
 		expect(result.hideThinking).toBe(true);
-		expect(result.model).toBe("opus");
+		expect(result.model).toBe("test-model");
 		expect(result.messages).toEqual([]);
 	});
 });

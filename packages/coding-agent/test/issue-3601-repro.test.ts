@@ -73,7 +73,7 @@ describe("CustomEditor empty bracketed paste (issue #3601)", () => {
 	});
 
 	it("preserves a real whitespace-only bracketed paste (must NOT hijack indentation copies)", () => {
-		// Codex review on PR #3602: a strict-empty guard is critical. A whitespace
+		// Provider review on PR #3602: a strict-empty guard is critical. A whitespace
 		// paste carries real user content (indentation, padding); routing it to
 		// `onPasteImage` would replace the bytes the terminal already delivered
 		// with the host clipboard (often empty in SSH/headless) and silently
@@ -124,7 +124,7 @@ describe("CustomEditor empty bracketed paste (issue #3601)", () => {
 		expect(editor.getText()).toBe("");
 	});
 
-	it("invokes onPasteImage when the empty bracketed paste is split across stdin chunks (Codex PR #3602 review)", () => {
+	it("invokes onPasteImage when the empty bracketed paste is split across stdin chunks (PR #3602 review)", () => {
 		// Some terminals (Windows Terminal under load, certain SSH muxes, …)
 		// fragment a bracketed paste so the start marker, payload, and end
 		// marker land in separate `handleInput` calls. The pre-fix guard saw
@@ -177,8 +177,8 @@ describe("CustomEditor empty bracketed paste (issue #3601)", () => {
 		expect(pasteText).toHaveBeenCalledWith("hello world");
 	});
 
-	it("defers a trailing keystroke after a Cmd+V empty paste until the image attach settles (Codex PR #3602 review)", async () => {
-		// Codex review: the empty bracketed paste plus a follow-up key (the
+	it("defers a trailing keystroke after a Cmd+V empty paste until the image attach settles (PR #3602 review)", async () => {
+		// Provider review: the empty bracketed paste plus a follow-up key (the
 		// user hits Enter right after Cmd+V) used to race — `onPasteImage`
 		// was fire-and-forget, so `\r` dispatched synchronously and submit
 		// ran against an empty `pendingImages`. The post-fix path queues

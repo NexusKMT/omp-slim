@@ -8,11 +8,11 @@ function model(id: string, provider: string): Model<Api> {
 	return createTestModel({ provider: provider, id: id });
 }
 
-const claude = model("claude-opus-4-8", "anthropic");
-const claudePrev = model("claude-opus-4-7", "anthropic");
-const gpt = model("gpt-5.4", "openai");
+const modelA = model("test-model-1", "test-a");
+const modelAPrev = model("test-model-0", "test-a");
+const modelB = model("test-model-2", "test-b");
 
-const available = [claude, gpt] as Model<Api>[];
+const available = [modelA, modelB] as Model<Api>[];
 
 /** Minimal registry stub: only the methods the facade and core resolver touch. */
 function registry(): ModelRegistry {
@@ -23,23 +23,23 @@ function registry(): ModelRegistry {
 
 describe("createExtensionModelQuery", () => {
 	test("current() reflects the live session model, read lazily", () => {
-		let active: Model<Api> | undefined = claude;
+		let active: Model<Api> | undefined = modelA;
 		const q = createExtensionModelQuery(registry(), undefined, () => active);
-		expect(q.current()).toBe(claude);
-		active = gpt;
-		expect(q.current()).toBe(gpt);
+		expect(q.current()).toBe(modelA);
+		active = modelB;
+		expect(q.current()).toBe(modelB);
 	});
 
 	test("resolve() matches model strings through the core resolver", () => {
 		const q = createExtensionModelQuery(registry(), undefined, () => undefined);
-		expect(q.resolve("anthropic/claude-opus-4-8")).toBe(claude);
-		expect(q.resolve("gpt-5.4")?.provider).toBe("openai");
+		expect(q.resolve("test-a/test-model-1")).toBe(modelA);
+		expect(q.resolve("test-model-2")?.provider).toBe("test-b");
 		expect(q.resolve("definitely-not-a-model")).toBeUndefined();
 	});
 
 	test("family() groups a vendor's point releases and separates vendors", () => {
 		const q = createExtensionModelQuery(registry(), undefined, () => undefined);
-		expect(q.family(claude)).toBe(q.family(claudePrev));
-		expect(q.family(claude)).not.toBe(q.family(gpt));
+		expect(q.family(modelA)).toBe(q.family(modelAPrev));
+		expect(q.family(modelA)).not.toBe(q.family(modelB));
 	});
 });

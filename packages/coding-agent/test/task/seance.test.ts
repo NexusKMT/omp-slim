@@ -39,8 +39,8 @@ function modelUsage(id: string, parentId: string, activeLeafId: string | null) {
 		purpose: "task-completion-probe",
 		role: "smol",
 		api: "openai-completions",
-		provider: "openai",
-		model: "gpt-4o",
+		provider: "test",
+		model: "test-model",
 		usage: {
 			input: 11,
 			output: 2,
@@ -87,8 +87,8 @@ describe("seance source resolution", () => {
 		const sessionDir = path.join(tempDir.path(), "sessions");
 		const file = path.join(sessionDir, "saved.jsonl");
 		await writeSession(file, "saved-source-id", cwd, [
-			modelChange("default-model", null, "anthropic/claude-sonnet-4-5", "default"),
-			modelChange("active-model", "default-model", "anthropic/claude-sonnet-4-6", "fast"),
+			modelChange("default-model", null, "test/test-model-2", "default"),
+			modelChange("active-model", "default-model", "test/test-model-3", "fast"),
 		]);
 		const original = await fs.readFile(file);
 		const options = { cwd, sessionDirHint: sessionDir };
@@ -96,12 +96,12 @@ describe("seance source resolution", () => {
 		await expect(resolveSeanceSource(file, options)).resolves.toEqual({
 			file,
 			id: "saved-source-id",
-			modelSelectors: ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"],
+			modelSelectors: ["test/test-model-3", "test/test-model-2"],
 		});
 		await expect(resolveSeanceSource("saved-source-id", options)).resolves.toEqual({
 			file,
 			id: "saved-source-id",
-			modelSelectors: ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"],
+			modelSelectors: ["test/test-model-3", "test/test-model-2"],
 		});
 		expect(await fs.readFile(file)).toEqual(original);
 	});
@@ -112,15 +112,15 @@ describe("seance source resolution", () => {
 		const sessionDir = path.join(tempDir.path(), "sessions");
 		const file = path.join(sessionDir, "late-usage.jsonl");
 		const entries = [
-			modelChange("default-model", null, "anthropic/claude-sonnet-4-5", "default"),
-			modelChange("probe-owner", "default-model", "openai/gpt-4o", "fast"),
-			modelChange("active-model", "default-model", "anthropic/claude-sonnet-4-6", "fast"),
+			modelChange("default-model", null, "test/test-model-2", "default"),
+			modelChange("probe-owner", "default-model", "test/test-model", "fast"),
+			modelChange("active-model", "default-model", "test/test-model-3", "fast"),
 			modelUsage("late-usage", "probe-owner", "active-model"),
 		];
 		await writeSession(file, "active-model-source", cwd, entries);
 		await expect(resolveSeanceSource(file, { cwd, sessionDirHint: sessionDir })).resolves.toMatchObject({
 			id: "active-model-source",
-			modelSelectors: ["anthropic/claude-sonnet-4-6", "anthropic/claude-sonnet-4-5"],
+			modelSelectors: ["test/test-model-3", "test/test-model-2"],
 		});
 
 		const clearedFile = path.join(sessionDir, "cleared-usage.jsonl");
@@ -284,14 +284,14 @@ describe("seance cold restore", () => {
 				// `glob.enabled: false` trimmed glob at spawn; `write` never belongs to a seance.
 				tools: ["read", "grep", "write", "yield"],
 				agent: "seance",
-				resolvedModel: "anthropic/claude-sonnet-4-5",
+				resolvedModel: "test/test-model-2",
 				restrictToolNames: true,
 				spawns: "",
 			};
 
 			await expect(restoreSeanceSession({ init, cwd, modelRegistry })).resolves.toEqual({
 				cwd,
-				modelPattern: "anthropic/claude-sonnet-4-5",
+				modelPattern: "test/test-model-2",
 				toolNames: ["read", "grep", "yield"],
 			});
 			await expect(

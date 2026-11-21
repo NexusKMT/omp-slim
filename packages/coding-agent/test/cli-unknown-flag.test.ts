@@ -25,14 +25,14 @@ describe("parseArgs — unrecognized flag tracking (#2459)", () => {
 	});
 
 	it("records a typo in a known flag name and stops the value from binding", () => {
-		const parsed = parseArgs(["--modle", "opus", "hi"]);
+		const parsed = parseArgs(["--modle", "test-model", "hi"]);
 
 		expect(parsed.unrecognizedFlags).toEqual(["--modle"]);
 		expect(parsed.model).toBeUndefined();
-		// `opus` still leaks into messages here (no way to tell from one token
+		// `test-model` still leaks into messages here (no way to tell from one token
 		// whether it was the flag's intended value); the caller exits on the
 		// non-empty unrecognizedFlags before the prompt is ever sent.
-		expect(parsed.messages).toEqual(["opus", "hi"]);
+		expect(parsed.messages).toEqual(["test-model", "hi"]);
 	});
 
 	it("records an unknown short flag (`-x`)", () => {
@@ -43,11 +43,11 @@ describe("parseArgs — unrecognized flag tracking (#2459)", () => {
 	});
 
 	it("leaves built-in flags out of unrecognizedFlags", () => {
-		const parsed = parseArgs(["--print", "--model", "opus", "hi"]);
+		const parsed = parseArgs(["--print", "--model", "test-model", "hi"]);
 
 		expect(parsed.unrecognizedFlags).toEqual([]);
 		expect(parsed.print).toBe(true);
-		expect(parsed.model).toBe("opus");
+		expect(parsed.model).toBe("test-model");
 		expect(parsed.messages).toEqual(["hi"]);
 	});
 

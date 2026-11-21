@@ -1,4 +1,4 @@
-// Issue #12525, provider half: OpenAI-compatible servers that report a
+// Issue #12525, provider half: compatible servers that report a
 // generation degenerating into repetition as a terminal signal
 // (`finish_reason: "repetition"`, and/or `stop_reason: "repetition_detected"`).
 // That fell through to the generic finish-reason default, so the turn surfaced
