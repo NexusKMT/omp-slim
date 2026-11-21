@@ -1059,7 +1059,9 @@ describe("MCP Streamable HTTP POST response resumption", () => {
 				return new Response("", { headers: { "Content-Type": "text/event-stream" } });
 			},
 		});
-		const transport = await connectedTransport();
+		// Leave room for hosted-runner scheduling so this asserts EOF handling,
+		// not whether a local request happened to start within the 50ms default.
+		const transport = await connectedTransport(1_000);
 
 		await expect(withPendingGuard(transport.request("tools/call"), "request")).rejects.toMatchObject({
 			transport: "http",
