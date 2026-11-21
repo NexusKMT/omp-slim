@@ -30,8 +30,8 @@ export function isInvalidatedOAuthTokenError(error: unknown): boolean {
  * Whether an upstream failure should retry through the credential resolver: a
  * typed token-refresh request, a hard `401`, a `403` (token valid but access
  * denied — plan, model policy, or org restriction a sibling account may not
- * share), an account-scoped policy denial such as Codex `cyber_policy`, a
- * body-classified usage limit (Codex `usage_limit_reached`, Anthropic account
+ * share), an account-scoped policy denial such as `cyber_policy`, a
+ * body-classified usage limit (`usage_limit_reached`, an account
  * rate-limit, Google `resource_exhausted`, OpenAI `insufficient_quota`, …), or
  * a bare `429` whose payload did not preserve a richer quota code. Transient
  * 429s (`Too many requests`, per-minute caps) stay in the upstream-backoff lane.

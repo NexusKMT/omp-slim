@@ -57,7 +57,7 @@ const RETRIABLE_KINDS =
 	Flag.Transient | Flag.UsageLimit | Flag.ThinkingLoop | Flag.ProviderFinishError | Flag.EmptyResponse;
 
 const CONTEXT_OVERFLOW_EVIDENCE_PATTERNS = [
-	/prompt is too long/i, // Anthropic
+	/prompt is too long/i, // generic prompt-too-long phrasing
 	/input is too long for requested model/i, // Amazon Bedrock
 	/exceeds the context window/i, // OpenAI (Completions & Responses API)
 	/input token count.*exceeds the maximum/i, // Google (Gemini)
@@ -80,7 +80,7 @@ const CONTEXT_OVERFLOW_EVIDENCE_PATTERNS = [
 	/request_too_large[^\n]*\btokens?\b/i,
 	/\btokens?\b[^\n]*request_too_large/i,
 	/model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
-	/prompt filled the context window/i, // Ollama OpenAI-compatible empty length completion
+	/prompt filled the context window/i, // OpenAI-compatible empty-length completion
 	/exceeds the limit of \d+ tokens?\b/i,
 	/chat history exceeds the \d+-message limit/i, // Provider message-count cap
 ] as const;
@@ -167,7 +167,7 @@ const PROVIDER_FINISH_ERROR_PATTERN = /\bProvider (?:returned error finish_reaso
 const EMPTY_RESPONSE_PATTERN = /\bthought-only response without final output\b/i;
 const CONTENT_FILTER_PATTERN = /\b(?:incomplete:\s*)?content_filter\b/i;
 /**
- * Local llama.cpp / Ollama deterministic tool-call argument JSON parse failure.
+ * Local llama.cpp deterministic tool-call argument JSON parse failure.
  * The model emitted invalid JSON in a tool call and the server returned HTTP 500
  * with this exact text — replaying the same prompt yields the same malformed
  * output, so callers strip {@link Flag.Transient} when this matches.
@@ -601,7 +601,7 @@ export interface ContextOverflowMessage extends Pick<
  * Provider-reported usage proves context-window excess — authoritative, compaction-owned (#9235).
  *
  * Prefers `contextTokens` when the provider reports it: providers that run
- * several model calls per turn (Cursor's server-side tool loop) report
+ * several model calls per turn (a server-side tool loop) report
  * `input`/`cacheRead` summed across those calls, which can exceed the window
  * many times over while the conversation itself stays small.
  */

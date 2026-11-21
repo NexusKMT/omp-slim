@@ -332,20 +332,6 @@ export interface OpenAIResponsesHistoryPayload {
 /** Anthropic `output_config.effort` level. */
 export type AnthropicOutputEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
-/** One `tool_addition`/`tool_removal` block of an Anthropic mid-conversation system message. */
-export interface AnthropicToolChange {
-	type: "tool_addition" | "tool_removal";
-	name: string;
-}
-
-/** Anthropic-only controls attached to a mid-conversation system message. */
-export interface AnthropicMessagePayload {
-	type: "anthropicMessage";
-	clearAt?: "never" | "next_user_message";
-	effort?: AnthropicOutputEffort;
-	toolChanges?: AnthropicToolChange[];
-}
-
 /**
  * Controls an Anthropic request declared, recorded on its response so later
  * requests over the same transcript replay a byte-identical prefix.
@@ -453,7 +439,6 @@ export interface GeminiNativeContentPayload {
 
 export type ProviderPayload =
 	| OpenAIResponsesHistoryPayload
-	| AnthropicMessagePayload
 	| AnthropicCompactionPayload
 	| CursorHistoryPayload
 	| GeminiNativeContentPayload;

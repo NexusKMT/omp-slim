@@ -12,7 +12,7 @@ import {
  *
  * Why this exists: `streamSimple`/`completeSimple` retry *auth* failures
  * (credential rotation) but deliberately surface *transient* provider failures
- * — Anthropic `overloaded_error`, `rate_limit_error`, HTTP 429/500/502/503/529
+ * — `overloaded_error`, `rate_limit_error`, HTTP 429/500/502/503/529
  * — as a **resolved** `AssistantMessage` with `stopReason: "error"`. For the
  * main agent turn that is correct: `TurnRecovery` owns recovery there, and it
  * must refuse to replay once tool calls or visible text have streamed.
@@ -25,7 +25,7 @@ import {
  * overload was indistinguishable from a legitimate empty result.
  *
  * Classification reuses the existing provider predicates (`AIError`), so the
- * set of retryable Anthropic failures stays defined in exactly one place.
+ * set of retryable provider failures stays defined in exactly one place.
  * Usage limits are included: unlike the provider loop — which excludes them so
  * credential rotation can own them — a oneshot has no rotation layer above it,
  * and the retry hint the provider supplies (`retry-after`, "try again in ~5m")
@@ -61,7 +61,7 @@ export interface OneshotRetryOptions {
 	/**
 	 * Headers of the attempt that just failed, used to honor `retry-after`.
 	 *
-	 * Load-bearing: a transient Anthropic failure arrives as a **resolved**
+	 * Load-bearing: a transient provider failure arrives as a **resolved**
 	 * `AssistantMessage`, and `AssistantMessage` carries no headers — so without
 	 * this the real `retry-after` / `x-ratelimit-reset` values on a 429/529 are
 	 * invisible and only the (usually hint-free) error text is available.
@@ -199,10 +199,10 @@ export async function retryTransientCompletion(
 			return message as AssistantMessage;
 		}
 
-		// Headers first: a real Anthropic 429/529 carries `retry-after` /
+		// Headers first: a real provider 429/529 carries `retry-after` /
 		// `x-ratelimit-reset*` in the response, and the resolved AssistantMessage
 		// has none — the caller supplies them via `getResponseHeaders`. Thrown
-		// errors (e.g. AnthropicApiError) carry their own headers.
+		// errors (thrown provider API errors) carry their own headers.
 		const headers: HeadersLike = thrown !== undefined ? getHeadersFromError(thrown) : options?.getResponseHeaders?.();
 		const headerHintMs = getRetryAfterMsFromHeaders(headers);
 		const extractedTextHintMs = extractProviderRetryHint(options?.provider, errorMessage);

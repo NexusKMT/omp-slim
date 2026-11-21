@@ -15,12 +15,13 @@ import type { JudgeOptions } from "./types";
  * Output budget for keyword replies. Sized against two independent constraints:
  *   - Backends that ignore `disableReasoning` still emit a thinking preamble
  *     (e.g. Qwen3 via llama.cpp catalogued `reasoning: false` but still thinking;
- *     Anthropic via LiteLLM/Vertex, whose `openai-completions` route downgrades a
- *     disabled request to the lowest reasoning effort instead of turning thinking
- *     off). The keyword must have room to land after that preamble (issue #4355).
- *   - Anthropic-dialect proxies reject `max_tokens <= thinking.budget_tokens`. The
- *     pinned lowest effort maps to at least Anthropic's 1024-token minimum budget,
- *     so the cap MUST comfortably exceed 1024 or every call 400s with
+ *     a reasoning model via LiteLLM/Vertex, whose `openai-completions` route
+ *     downgrades a disabled request to the lowest reasoning effort instead of
+ *     turning thinking off). The keyword must have room to land after that
+ *     preamble (issue #4355).
+ *   - Reasoning-dialect proxies reject `max_tokens <= thinking.budget_tokens`.
+ *     The pinned lowest effort maps to at least a 1024-token minimum budget, so
+ *     the cap MUST comfortably exceed 1024 or every call 400s with
  *     `max_tokens must be greater than thinking.budget_tokens` (issue #8610).
  * `maxTokens` is a hard cap — non-thinking completions still return in a handful
  * of tokens.

@@ -58,8 +58,8 @@ afterEach(() => {
 });
 
 describe("AssistantMessageComponent error rendering", () => {
-	// A proxy 502 returns its own HTML page as the body; AnthropicApiError folds
-	// that whole document into `errorMessage`. The inline transcript render must
+	// A proxy 502 returns its own HTML page as the body; the provider API error
+	// folds that whole document into `errorMessage`. The inline transcript render must
 	// not faithfully reprint every line, or the scrollback fills with the HTML
 	// page's blank lines (the reported "weird terminal state").
 	const longLine = "x".repeat(300);

@@ -250,8 +250,8 @@ export function isBillingCapUsageLimit(status: number | undefined, message: stri
  * Returns true for failures that should burn one credential and rotate to a
  * sibling account. Decision tree:
  *
- *  1. Body matches {@link isUsageLimitError} (Codex `usage_limit_reached`,
- *     Anthropic account rate-limit, Google `resource_exhausted`, OpenAI
+ *  1. Body matches {@link isUsageLimitError} (`usage_limit_reached`,
+ *     an account rate-limit, Google `resource_exhausted`, OpenAI
  *     `insufficient_quota`, …) → rotate.
  *  2. Status is not a usage-limit status (429/402) → backoff (caller's domain).
  *  3. Body is absent or {@link isOpaqueStatusBody opaque} (just the status,
