@@ -71,7 +71,7 @@ describe("print mode disposes the session before terminating", () => {
 
 		// "Working..." (the text-mode admission indicator) precedes the
 		// terminal error line; dispose still lands before the error stderr.
-		expect(order).toEqual(["stderr", "catchup", "dispose", "stderr"]);
+		expect(order).toEqual(["stderr", "dispose", "stderr"]);
 		expect(stderrLines.join("")).toContain("boom");
 	});
 

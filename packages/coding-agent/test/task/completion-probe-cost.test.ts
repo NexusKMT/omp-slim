@@ -1,3 +1,4 @@
+import { createTestModel } from "../helpers/test-model";
 import { afterAll, beforeAll, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
@@ -53,8 +54,7 @@ describe("completion probe cost persistence", () => {
 	afterAll(() => authStorage.close());
 
 	it("keeps late successful probe billing in live and cold lifetime totals across branch changes", async () => {
-		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!target) throw new Error("Expected a bundled model with a context window");
+		const target = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		using tempDir = TempDir.createSync("@omp-completion-probe-cost-");
 		const rootSessionFile = path.join(tempDir.path(), "main.jsonl");
@@ -191,8 +191,7 @@ describe("completion probe cost persistence", () => {
 	});
 
 	it("continues on the restored leaf after flushing and reopening before close", async () => {
-		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!target) throw new Error("Expected a bundled model with a context window");
+		const target = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		using tempDir = TempDir.createSync("@omp-late-usage-reopen-");
 		const original = SessionManager.create(tempDir.path(), tempDir.path());
@@ -274,8 +273,7 @@ describe("completion probe cost persistence", () => {
 	});
 
 	it("replays an explicit cleared leaf after late usage is flushed", async () => {
-		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!target) throw new Error("Expected a bundled model with a context window");
+		const target = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		using tempDir = TempDir.createSync("@omp-cleared-usage-leaf-");
 		const original = SessionManager.create(tempDir.path(), tempDir.path());

@@ -117,7 +117,7 @@ describe("print mode async-result wake", () => {
 
 		expect(await runPrintMode(session, { mode: "text", messages: ["go"] })).toBe(0);
 
-		expect(events).toEqual(["prompt:go", "advisor-drain", "advisor-catchup", "dispose(pending=1)"]);
+		expect(events).toEqual(["prompt:go", "dispose(pending=1)"]);
 		expect(lines.join("")).toBe("started\n");
 	});
 	test("with async.printWake, a job started by a follow-up turn is waited for and answers last", async () => {
@@ -128,14 +128,7 @@ describe("print mode async-result wake", () => {
 
 		expect(await runPrintMode(session, { mode: "text", messages: ["go"] })).toBe(0);
 
-		expect(events).toEqual([
-			"prompt:go",
-			"wake:1",
-			"wake:2",
-			"advisor-drain",
-			"advisor-catchup",
-			"dispose(pending=0)",
-		]);
+		expect(events).toEqual(["prompt:go", "wake:1", "wake:2", "dispose(pending=0)"]);
 		expect(lines.join("")).toBe("result 2\n");
 	});
 
@@ -152,7 +145,7 @@ describe("print mode async-result wake", () => {
 		});
 
 		expect(code).toBe(0);
-		expect(events).toEqual(["prompt:go", "wake:1", "advisor-drain", "advisor-catchup", "dispose(pending=0)"]);
+		expect(events).toEqual(["prompt:go", "wake:1", "dispose(pending=0)"]);
 		expect(lines.join("")).toBe("result 1\n");
 	});
 
@@ -164,7 +157,7 @@ describe("print mode async-result wake", () => {
 
 		expect(await runPrintMode(session, { mode: "text", messages: [] })).toBe(0);
 
-		expect(events).toEqual(["advisor-drain", "advisor-catchup", "dispose(pending=0)"]);
+		expect(events).toEqual(["dispose(pending=0)"]);
 	});
 
 	test("with async.printWake, reaching --max-time while a job runs cancels it at once and fails the run", async () => {
@@ -181,8 +174,8 @@ describe("print mode async-result wake", () => {
 		const code = await runPrintMode(session, { mode: "text", messages: ["go"], deadline: Date.now() + 50 });
 
 		expect(code).toBe(1);
-		// no advisor catch-up: the jobs stay live until dispose cancels them
-		expect(events).toEqual(["prompt:go", "advisor-drain", "dispose(pending=1)"]);
+		// The jobs stay live until dispose cancels them.
+		expect(events).toEqual(["prompt:go", "dispose(pending=1)"]);
 		expect(lines.join("")).toBe("");
 		expect(stderr.join("")).toContain("--max-time reached before background work settled");
 	});
@@ -196,7 +189,7 @@ describe("print mode async-result wake", () => {
 		const code = await runPrintMode(session, { mode: "text", messages: ["go"], deadline: Date.now() - 1 });
 
 		expect(code).toBe(1);
-		expect(events).toEqual(["prompt:go", "advisor-drain", "dispose(pending=1)"]);
+		expect(events).toEqual(["prompt:go", "dispose(pending=1)"]);
 		expect(lines.join("")).toBe("");
 	});
 
@@ -209,7 +202,7 @@ describe("print mode async-result wake", () => {
 		const code = await runPrintMode(session, { mode: "text", messages: ["go"], deadline: Date.now() + 50 });
 
 		expect(code).toBe(1);
-		expect(events).toEqual(["prompt:go", "wake:1", "advisor-drain", "dispose(pending=0)"]);
+		expect(events).toEqual(["prompt:go", "wake:1", "dispose(pending=0)"]);
 		expect(lines.join("")).toBe("");
 	});
 
@@ -222,7 +215,7 @@ describe("print mode async-result wake", () => {
 		const code = await runPrintMode(session, { mode: "text", messages: ["go"], deadline: Date.now() + 50 });
 
 		expect(code).toBe(1);
-		expect(events).toEqual(["prompt:go", "advisor-drain", "dispose(pending=1)"]);
+		expect(events).toEqual(["prompt:go", "dispose(pending=1)"]);
 	});
 });
 

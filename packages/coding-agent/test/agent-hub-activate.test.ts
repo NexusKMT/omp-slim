@@ -1,3 +1,4 @@
+import { createTestModel } from "./helpers/test-model";
 import { createAgentHubRuntime } from "@oh-my-pi/pi-coding-agent/modes/agent-hub-runtime";
 /**
  * Hub Enter contract: activating a non-remote agent row delegates to the
@@ -923,8 +924,7 @@ describe("Agent hub data refresh coalescing", () => {
 		let childSession: AgentSession | undefined;
 		try {
 			const modelRegistry = new ModelRegistry(authStorage);
-			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-			if (!model) throw new Error("Expected a bundled model");
+			const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 			const parentManager = SessionManager.inMemory();
 			parentManager.appendMessage({ role: "user", content: "parent task", timestamp: 1 });
@@ -1012,8 +1012,7 @@ describe("Agent hub data refresh coalescing", () => {
 		let lifecycle: AgentLifecycleManager | undefined;
 		try {
 			const modelRegistry = new ModelRegistry(authStorage);
-			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-			if (!model) throw new Error("Expected a bundled model");
+			const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 			const manager = SessionManager.inMemory();
 			manager.appendMessage({ role: "user", content: "work", timestamp: 1 });
@@ -1088,8 +1087,7 @@ describe("Agent hub data refresh coalescing", () => {
 		let session: AgentSession | undefined;
 		try {
 			const modelRegistry = new ModelRegistry(authStorage);
-			const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-			if (!model) throw new Error("Expected a bundled model");
+			const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 			const manager = SessionManager.inMemory();
 			manager.appendMessage({ role: "user", content: "initial turn", timestamp: 1 });

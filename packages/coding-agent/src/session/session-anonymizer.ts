@@ -249,6 +249,17 @@ const FIELD_RULES: Record<string, Rule> = {
 		"visibility",
 		"errorKind",
 	]),
+	...fields("identity", [
+		"api",
+		"provider",
+		"model",
+		"resolvedModel",
+		"perCallModelIdentity",
+		"upstreamProvider",
+		"upstreamModel",
+		"selector",
+		"resolvedModelIdentity",
+	]),
 	agent: "agent",
 	spawns: "spawns",
 	...fields("id", [

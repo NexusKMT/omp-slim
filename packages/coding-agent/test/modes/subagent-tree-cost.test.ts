@@ -1,3 +1,4 @@
+import { createTestModel } from "../helpers/test-model";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -133,8 +134,8 @@ describe("sumSubagentTreeCost", () => {
 		const sessions: AgentSession[] = [];
 		try {
 			const models = new ModelRegistry(auth);
-			const model = models.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-			if (!model) throw new Error("Expected a bundled model");
+			const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
+
 			const parentManager = SessionManager.inMemory();
 			parentManager.appendMessage({ role: "user", content: "review", timestamp: 1 });
 			const ownerParent = parentManager.appendMessage(assistant(model, 0.6, 2));
@@ -207,8 +208,8 @@ describe("sumSubagentTreeCost", () => {
 		let resumed: AgentSession | undefined;
 		try {
 			const models = new ModelRegistry(auth);
-			const model = models.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-			if (!model) throw new Error("Expected a bundled model");
+			const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
+
 			const manager = SessionManager.inMemory();
 			manager.appendMessage(assistant(model, 0.6, 1));
 			const session = liveSession(manager, model, models);

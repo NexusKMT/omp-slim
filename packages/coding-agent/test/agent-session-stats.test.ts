@@ -1,3 +1,4 @@
+import { createTestModel } from "./helpers/test-model";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Message, Model, Usage, UserMessage } from "@oh-my-pi/pi-ai";
@@ -13,9 +14,7 @@ describe("AgentSession session stats", () => {
 	let modelRegistry: ModelRegistry;
 	let session: AgentSession | undefined;
 	const model = (): Model => {
-		const found = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!found) throw new Error("Expected a bundled model");
-		return found;
+		return createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 	};
 	const appendUsage = (manager: SessionManager, target: Model, input: number, overrides: Partial<Usage> = {}) =>
 		manager.appendModelUsage(
@@ -179,10 +178,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("preserves authoritative provider occupancy above the local transcript estimate", () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model?.contextWindow) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		const userMessage: UserMessage = {
 			role: "user",
@@ -233,17 +229,14 @@ describe("AgentSession session stats", () => {
 
 		expect(directUsage).toEqual({
 			tokens: 120_000,
-			contextWindow: model.contextWindow,
-			percent: (120_000 / model.contextWindow) * 100,
+			contextWindow: 200_000,
+			percent: 60,
 		});
 		expect(stats.contextUsage).toEqual(directUsage);
 	});
 
 	it("treats persisted assistant messages without usage as zero-cost history", async () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		using tempDir = TempDir.createSync("@omp-session-stats-");
 		const sessionFile = `${tempDir.path()}/repro.jsonl`;
@@ -325,10 +318,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("reconstructs persisted and active tool-loop context when provider prompt usage is unavailable", async () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model?.contextWindow) {
-			throw new Error("Expected bundled model with a context window");
-		}
+		const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		const outputOnlyUsage = {
 			input: 0,
@@ -416,8 +406,7 @@ describe("AgentSession session stats", () => {
 	});
 
 	it("aggregates provider credits and concrete routed models", () => {
-		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!model) throw new Error("Expected a bundled model");
+		const model = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		const usage = {
 			input: 1,

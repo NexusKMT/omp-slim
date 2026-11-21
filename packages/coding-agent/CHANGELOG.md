@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- Restored the latest non-fallback model role in persisted Agent Hub rows.
 - Wait for assistant transcript persistence before tool execution so data-less `yield` can read its report and session rebuilds retain the active tool call ([#12247](https://github.com/can1357/oh-my-pi/issues/12247)).
 - Include inline tool descriptions and resolvable `skill://` addresses in the minimal system prompt.
 - User-authored system customization and always-apply rules remain in the minimal system prompt, including after session reset and template fallback.

@@ -165,7 +165,7 @@ describe("pause screen", () => {
 			expect(lines).toHaveLength(24);
 			expect(text).toContain("█".repeat(5));
 			expect(text).toContain("P A U S E D");
-			expect(text).toContain("Main agent, subagents, and advisor");
+			expect(text).toContain("Main agent and subagents hold at their next step.");
 			expect(text).toContain("Paused — ready to suspend");
 			expect(text).toContain("paused for 1:02:05");
 			expect(text).toContain("— resume");

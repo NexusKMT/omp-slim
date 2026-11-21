@@ -38,7 +38,20 @@ describe("isProviderRetryableError", () => {
 
 	it("does not retry non-transient validation errors", () => {
 		expect(isProviderRetryableError(new Error("Invalid tool schema"))).toBe(false);
-		expect(isProviderRetryableError(new Error("Bad request"))).toBe(false);
+		// The HTTP rejection wins over a transient-looking response body.
+		const badRequest = Object.assign(new Error("unexpected EOF"), { status: 400 });
+		expect(isProviderRetryableError(badRequest)).toBe(false);
+	});
+
+	it("keeps transient-looking gateway errors terminal when the HTTP status is 400", () => {
+		for (const text of [
+			"The provided URL does not appear to be valid. Ensure it is correctly formatted.",
+			"Download multimodal file timed out",
+		]) {
+			const message = `400 <400> InternalError.Algo.InvalidParameter: ${text}\n<400> InternalError.Algo.InvalidParameter: ${text} (type=invalid_request_error param=invalid_parameter_error)`;
+			const err = Object.assign(new Error(message), { status: 400 });
+			expect(isProviderRetryableError(err)).toBe(false);
+		}
 	});
 
 	it("does not retry persistent account usage/quota limits despite rate-limit wording", () => {
@@ -66,18 +79,5 @@ describe("isProviderRetryableError", () => {
 		).toBe(false);
 		// A generic transient rate limit (no account/usage framing) still retries.
 		expect(isProviderRetryableError(new Error("Rate limit exceeded"))).toBe(true);
-	});
-	it("retries Aliyun multimodal-gateway 400s (flaky, byte-identical replay succeeds)", () => {
-		for (const text of [
-			"The provided URL does not appear to be valid. Ensure it is correctly formatted.",
-			"Download multimodal file timed out",
-		]) {
-			const message = `400 <400> InternalError.Algo.InvalidParameter: ${text}\n<400> InternalError.Algo.InvalidParameter: ${text} (type=invalid_request_error param=invalid_parameter_error)`;
-			const err = Object.assign(new Error(message), { status: 400 });
-			expect(isProviderRetryableError(err)).toBe(true);
-		}
-		// A genuine validation 400 stays terminal.
-		const bad = Object.assign(new Error("400 invalid_request_error: unknown field 'temperaturee'"), { status: 400 });
-		expect(isProviderRetryableError(bad)).toBe(false);
 	});
 });

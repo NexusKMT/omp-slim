@@ -238,6 +238,8 @@ async function readPersistedAgentHistory(
 	// run to it would report work the previous model did.
 	let resolvedModel: string | undefined;
 	let resolvedModelIsFallback: boolean | undefined;
+	// Historical display only; legacy roles never select a model on revival.
+	let modelRole: string | undefined;
 	let contextTokens: number | undefined;
 	let servedModel: string | undefined;
 	let latestModelChange: { model: string; resolvedModelIsFallback: boolean } | undefined;
@@ -247,6 +249,13 @@ async function readPersistedAgentHistory(
 		const modelChange = modelChangeById.get(id);
 		if (modelChange) {
 			latestModelChange ??= modelChange;
+			if (
+				modelChange.role &&
+				modelChange.role !== EPHEMERAL_MODEL_CHANGE_ROLE &&
+				modelChange.role !== PREWALK_MODEL_CHANGE_ROLE
+			) {
+				modelRole ??= modelChange.role;
+			}
 			// The transition that installed the serving model: it carries the
 			// fallback flag the raw message lacks. Every writer records the selector
 			// through `formatModelStringWithRouting`, which appends an `@upstream`
@@ -284,6 +293,7 @@ async function readPersistedAgentHistory(
 		directCost,
 		...(metrics.requests > 0 ? { metrics } : {}),
 		...(resolvedModel ? { resolvedModel, resolvedModelIsFallback } : {}),
+		...(modelRole ? { modelRole } : {}),
 	};
 }
 
@@ -370,6 +380,7 @@ async function readPersistedAgentMetadata(
 					...history,
 					...inferred,
 					agent: typeof record.agent === "string" ? record.agent : inferred.agent,
+					modelRole: typeof record.modelRole === "string" ? record.modelRole : history.modelRole,
 					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
 					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
 				};

@@ -1,3 +1,4 @@
+import { createTestModel } from "./helpers/test-model";
 /**
  * The footer's cost segment used to be a hand-rolled loop over session entries
  * that only counted `assistant` messages. A `task` subagent reports its spend
@@ -32,8 +33,7 @@ describe("FooterComponent session cost", () => {
 	it("counts a task toolResult's usage in the footer total", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!target) throw new Error("Expected bundled model with a context window");
+		const target = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		const manager = SessionManager.inMemory();
 		manager.appendMessage({ role: "user", content: "delegate this", timestamp: 1 });
@@ -103,8 +103,7 @@ describe("FooterComponent session cost", () => {
 	it("keeps pre-compaction cost in the footer total", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const target = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
-		if (!target) throw new Error("Expected bundled model with a context window");
+		const target = createTestModel({ provider: "test", id: "usage-model", contextWindow: 200_000 });
 
 		const assistant = (cost: number, timestamp: number) => ({
 			role: "assistant" as const,

@@ -26,7 +26,7 @@ import { CollapsedSyntheticMessageComponent, UserMessageComponent } from "@oh-my
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { card, node, text } from "@oh-my-pi/pi-tui/native/describe";
 import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
-import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { setInternalUrlSchemeHost } from "@oh-my-pi/pi-tui/tools/url-scheme-host";
 import { Container } from "@oh-my-pi/pi-tui/tui";
 import type { TspNode, TspOp } from "@oh-my-pi/pi-wire";
@@ -976,7 +976,6 @@ describe("native transcript", () => {
 				"omp.diagnostics.late",
 				"omp.marker.cache-miss",
 				"omp.status-block",
-				"omp.advisor",
 			]),
 		);
 		expect(h.errors).toEqual([]);
