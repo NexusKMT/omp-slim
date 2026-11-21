@@ -23,7 +23,7 @@ afterEach(() => {
 
 describe("agentic commit model routing", () => {
 	it("runs the parent commit agent on the selected commit model", async () => {
-		const primaryModel = createTestModel({ provider: "anthropic", id: "claude-opus-4-5" });
+		const primaryModel = createTestModel({ provider: "test", id: "test-model" });
 		if (!primaryModel) throw new Error("Expected bundled commit test models");
 
 		authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));

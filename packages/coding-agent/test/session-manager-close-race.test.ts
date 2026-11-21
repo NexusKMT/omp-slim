@@ -151,7 +151,7 @@ describe("SessionManager close/appendMessage race", () => {
 	it("appendMessage during in-flight close() does not stash a persistError", async () => {
 		const storage = new CloseHoldingStorage();
 		const sm = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 		// Seed an assistant message so persist activates (the `#ensuredOnDisk`

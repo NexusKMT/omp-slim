@@ -34,7 +34,7 @@ describe("a reply wait on an agent in `ask`", () => {
 		await initTheme(false);
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-wait-reply-ask-${Snowflake.next()}-`));
 		authStorage = await AuthStorage.create(path.join(tempDir, "auth.db"));
-		authStorage.keys.setRuntime("openai", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -71,7 +71,7 @@ describe("a reply wait on an agent in `ask`", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated({ "async.enabled": false }),
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			hasUI: true,
 			disableExtensionDiscovery: true,
 			skills: [],

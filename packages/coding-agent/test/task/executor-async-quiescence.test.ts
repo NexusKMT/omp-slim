@@ -208,7 +208,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "do the work",
 			index: 0,
 			id: "quiescence-fresh-yield",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 
 		// Run did not terminate on the parked yield: the barrier noticed, the
@@ -239,7 +239,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "verify the build",
 			index: 0,
 			id: "quiescence-wait-before-yield",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 
 		expect(harness.settleCalls()).toBe(1);
@@ -263,7 +263,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "do the work",
 			index: 0,
 			id: "quiescence-stale-refusal",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 
 		// task + notice + full reminder ladder (3).
@@ -290,7 +290,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "do the work",
 			index: 0,
 			id: "quiescence-no-async",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 
 		expect(harness.prompts).toHaveLength(1);
@@ -321,7 +321,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "do the work",
 			index: 0,
 			id: "quiescence-no-second-idle",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 		const outcome = await Promise.race([
 			run.then(() => "completed" as const),
@@ -380,7 +380,7 @@ describe("runSubprocess async quiescence fresh-yield contract", () => {
 			task: "do the work",
 			index: 0,
 			id: "cleanup-timeout",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			keepAlive: false,
 			cleanupGraceMs,
 			onCleanupDeferred: completion => {

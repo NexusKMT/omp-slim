@@ -86,7 +86,7 @@ it("overlaps registry refresh with session-file opening and session setup", asyn
 		task: "test",
 		index: 0,
 		id: "task-launch-overlap",
-		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+		parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		authStorage,
 		enableLsp: false,
 		enableIrc: false,

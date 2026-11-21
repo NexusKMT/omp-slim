@@ -36,7 +36,7 @@ describe("createAgentSession MCP deferral (B1)", () => {
 		modelRegistry,
 		sessionManager: SessionManager.inMemory(),
 		settings: Settings.isolated({}),
-		model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+		model: createTestModel({ provider: "test", id: "test-model" }),
 		disableExtensionDiscovery: true,
 		skills: [],
 		contextFiles: [],
@@ -192,7 +192,7 @@ describe("createAgentSession MCP catalog handoff", () => {
 				agentDir: tempDir,
 				authStorage,
 				modelRegistry: new ModelRegistry(authStorage, path.join(tempDir, "models.yml")),
-				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+				model: createTestModel({ provider: "test", id: "test-model" }),
 				// A zero startup window waits for the fixture to connect, so its change
 				// lands while extensions load, the window this contract covers.
 				settings: Settings.isolated({ "mcp.enableProjectConfig": true, "mcp.startupTimeoutMs": 0 }),

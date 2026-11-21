@@ -63,7 +63,7 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 			}),
 		);
 		registry = new ModelRegistry(createInMemoryAuthStorage(), modelsDir.join("models.yml"));
-		registry.authStorage.keys.setRuntime("openai", "test-key");
+		registry.authStorage.keys.setRuntime("test", "test-key");
 	});
 	beforeEach(() => {
 		resetSettingsForTest();
@@ -95,7 +95,7 @@ describe("ctx.sessionModes in the interactive TUI", () => {
 			cwd: dir.path(),
 			agentDir: dir.path(),
 			modelRegistry: registry,
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			sessionManager: SessionManager.create(dir.path(), dir.path()),
 			settings: Settings.isolated({
 				"plan.enabled": true,

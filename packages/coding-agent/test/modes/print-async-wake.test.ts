@@ -256,7 +256,7 @@ describe("print mode async-result wake with a real session", () => {
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
-				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				model: createTestModel({ provider: "test", id: "test-model" })!,
 				systemPrompt: ["Test"],
 				tools: [],
 			},
@@ -265,7 +265,7 @@ describe("print mode async-result wake with a real session", () => {
 		});
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const settings = Settings.isolated();
 		if (printWake) cfgAsyncPrintWake.override(settings, true);
 		const session = new AgentSession({

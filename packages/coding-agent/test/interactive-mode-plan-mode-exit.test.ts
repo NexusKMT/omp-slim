@@ -43,7 +43,7 @@ describe("InteractiveMode plan mode exit", () => {
 	beforeEach(async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		// prompt() preflights credentials via modelRegistry.getApiKey; the in-memory
 		// auth storage has no anthropic key, so stub it.
 		vi.spyOn(modelRegistry, "getApiKey").mockResolvedValue("test-key");

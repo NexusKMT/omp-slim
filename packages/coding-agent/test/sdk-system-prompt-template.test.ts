@@ -36,7 +36,7 @@ async function withSession<T>(
 			modelRegistry,
 			settings: Settings.isolated(),
 			sessionManager: SessionManager.inMemory(cwd),
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

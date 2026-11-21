@@ -19,7 +19,7 @@ describe("AgentSession idle custom message render", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-idle-custom-render-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -29,7 +29,7 @@ describe("AgentSession idle custom message render", () => {
 	});
 
 	function createSession(): { session: AgentSession; streamCalls: () => number } {
-		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		let streamCallCount = 0;
 		const agent = new Agent({

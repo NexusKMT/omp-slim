@@ -53,7 +53,7 @@ describe("artifact reads through session approval", () => {
 					"bash.autoBackground.enabled": false,
 					"bashInterceptor.enabled": false,
 				}),
-				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+				model: createTestModel({ provider: "test", id: "test-model" }),
 				bindProcessState: false,
 				taskDepth,
 				disableExtensionDiscovery: true,

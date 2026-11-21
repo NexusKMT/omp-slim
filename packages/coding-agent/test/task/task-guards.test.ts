@@ -182,7 +182,7 @@ const baseOptions = {
 	id: "subagent-guards",
 	modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 	enableLsp: false,
-	parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+	parentModel: createTestModel({ provider: "test", id: "test-model" }),
 };
 
 describe("runSubprocess request guards", () => {

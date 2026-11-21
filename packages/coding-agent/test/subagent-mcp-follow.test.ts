@@ -47,7 +47,7 @@ describe("subagent session MCP tools follow the shared manager", () => {
 		dir = path.join(os.tmpdir(), `omp-subagent-mcp-follow-${Snowflake.next()}`);
 		fs.mkdirSync(dir, { recursive: true });
 		authStorage = await AuthStorage.create(path.join(dir, "auth.db"));
-		authStorage.keys.setRuntime("openai", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		manager = new MCPManager(dir, null, async () => ({ configs: {}, sources: {} }));
 	});
 
@@ -75,7 +75,7 @@ describe("subagent session MCP tools follow the shared manager", () => {
 			modelRegistry: new ModelRegistry(authStorage),
 			sessionManager: SessionManager.inMemory(),
 			settings: Settings.isolated(),
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

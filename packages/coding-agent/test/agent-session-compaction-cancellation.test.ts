@@ -45,7 +45,7 @@ describe.each([false, true])("AgentSession compaction cancellation source (exper
 			new Error("Network access is forbidden in compaction cancellation tests"),
 		);
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -82,7 +82,7 @@ describe.each([false, true])("AgentSession compaction cancellation source (exper
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		const modelRegistry = new ModelRegistry(authStorage);
 		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const settings = Settings.isolated({
 			"compaction.keepRecentTokens": 1,

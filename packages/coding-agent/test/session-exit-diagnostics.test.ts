@@ -65,9 +65,9 @@ describe("session exit diagnostics", () => {
 	it("records a durable tool start marker and shutdown diagnostic before a pending result exists", async () => {
 		tempDir = TempDir.createSync("@pi-session-exit-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const agent = new Agent({
@@ -144,9 +144,9 @@ describe("session exit diagnostics", () => {
 	it("signal teardown persists the postmortem reason, not the generic dispose", async () => {
 		tempDir = TempDir.createSync("@pi-session-exit-signal-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const agent = new Agent({
@@ -213,7 +213,7 @@ describe("session exit diagnostics", () => {
 		tempDir = TempDir.createSync("@pi-empty-session-exit-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		const sessionFile = sessionManager.getSessionFile();

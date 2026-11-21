@@ -75,7 +75,7 @@ function mirrorOf(session: AgentSessionHandle | null | undefined): RemoteAgentSe
 }
 
 async function mainSession(id: string): Promise<AgentSession> {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("bundled model missing");
 	const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 	const agent = new Agent({
@@ -85,7 +85,7 @@ async function mainSession(id: string): Promise<AgentSession> {
 		streamFn: mock.stream,
 	});
 	const authStorage = await AuthStorage.create(":memory:");
-	authStorage.keys.setRuntime("anthropic", "test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 	const session = new AgentSession({
 		agent,
 		sessionManager: SessionManager.inMemory(),

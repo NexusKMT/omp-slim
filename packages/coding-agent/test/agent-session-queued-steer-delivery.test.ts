@@ -64,7 +64,7 @@ describe("AgentSession queued steer delivery", () => {
 		fixtureDir = path.join(os.tmpdir(), `pi-steer-strand-fixture-${Snowflake.next()}`);
 		fs.mkdirSync(fixtureDir, { recursive: true });
 		authStorage = await AuthStorage.create(path.join(fixtureDir, "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, path.join(fixtureDir, "models.yml"));
 	});
 
@@ -87,7 +87,7 @@ describe("AgentSession queued steer delivery", () => {
 		responses: MockHandler[],
 		promptTemplates: PromptTemplate[] = [],
 	): Promise<SteerHarness> {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({ responses });
 		const agent = new Agent({
 			getApiKey: () => "test-key",

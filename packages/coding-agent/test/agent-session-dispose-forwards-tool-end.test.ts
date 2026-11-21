@@ -25,7 +25,7 @@ describe("AgentSession dispose forwards tool ends settled inside its drain", () 
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@omp-dispose-tool-end-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(() => {
@@ -36,7 +36,7 @@ describe("AgentSession dispose forwards tool ends settled inside its drain", () 
 
 	/** Start a turn whose tool ignores abort and settles only when the test releases it, like a client-bridge read. */
 	async function startUncancellableTool() {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const toolStarted = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();

@@ -45,7 +45,7 @@ describe("execfs:// tools are exec-gated through the production approval wrapper
 			agentDir: tempDir,
 			sessionManager,
 			settings: Settings.isolated(BASE_SETTINGS),
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

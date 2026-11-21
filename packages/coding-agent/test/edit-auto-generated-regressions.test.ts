@@ -89,7 +89,7 @@ function createSessionWith(
 	settingsOverrides: Record<string, unknown> = {},
 ): Promise<{ agent: Agent; session: AgentSession; authStorage: AuthStorage }> {
 	return (async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: { model, systemPrompt: ["Test"], tools: [tool] },
@@ -98,7 +98,7 @@ function createSessionWith(
 		const sessionManager = SessionManager.inMemory(tempDir);
 		const settings = Settings.isolated(settingsOverrides);
 		const authStorage = await AuthStorage.create(path.join(tempDir, "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
 		return {
 			agent,

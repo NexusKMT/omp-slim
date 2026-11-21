@@ -66,7 +66,7 @@ describe("component escape bindings", () => {
 		});
 		setKeybindings(keybindings);
 
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
 			throw new Error("Expected bundled model anthropic/claude-sonnet-4-5");
 		}

@@ -35,7 +35,7 @@ import { createTestModel } from "./helpers/test-model";
  * point without spinning a real model.
  */
 const sharedAuthStorage = createInMemoryAuthStorage();
-sharedAuthStorage.keys.setRuntime("anthropic", "test-key");
+sharedAuthStorage.keys.setRuntime("test", "test-key");
 const sharedModelRegistry = new ModelRegistry(sharedAuthStorage);
 
 afterAll(() => {
@@ -137,7 +137,7 @@ describe("AgentSession mid-run todo reconciliation nudge", () => {
 		tempDir = TempDir.createSync("@pi-todo-mid-run-nudge-");
 		sessionManager = SessionManager.inMemory(tempDir.path());
 
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 		const settings = Settings.isolated({

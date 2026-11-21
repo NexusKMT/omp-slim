@@ -122,7 +122,7 @@ describe("runSubprocess deferred cleanup outcome (issue #9670)", () => {
 			task: "do the work",
 			index: 0,
 			id: "issue-9670-aborted",
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			keepAlive: false,
 			signal: controller.signal,
 			cleanupGraceMs: 0,

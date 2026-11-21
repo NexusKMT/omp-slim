@@ -59,7 +59,7 @@ describe("flushCompactionQueue failure", () => {
 			getApiKey: () => "test-key",
 			convertToLlm,
 			initialState: {
-				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				model: createTestModel({ provider: "test", id: "test-model" })!,
 				systemPrompt: ["Test"],
 				tools: [],
 			},
@@ -67,7 +67,7 @@ describe("flushCompactionQueue failure", () => {
 		});
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const live = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),

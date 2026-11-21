@@ -233,7 +233,7 @@ describe("runSubprocess result acceptance", () => {
 			task: "do the work",
 			index: 0,
 			id: AGENT_ID,
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		});
 
 		expect(result.exitCode).toBe(0);
@@ -268,7 +268,7 @@ describe("runSubprocess result acceptance", () => {
 				index: 0,
 				id: AGENT_ID,
 				signal,
-				parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+				parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			});
 			if (result.exitCode !== 0) throw new Error(result.abortReason ?? result.error ?? "Task failed");
 			return result.output;

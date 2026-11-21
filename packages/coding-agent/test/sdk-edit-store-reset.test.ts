@@ -28,9 +28,9 @@ describe("sdk edit-store session reset", () => {
 
 	it("clears the tool-side hashline store on /new so stale tags stop resolving (#13370)", async () => {
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) throw new Error("Expected built-in anthropic model to exist");
 		tempDir = TempDir.createSync("@omp-edit-store-reset-");
 		const settings = Settings.isolated({

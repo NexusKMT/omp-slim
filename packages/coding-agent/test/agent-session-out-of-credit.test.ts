@@ -57,15 +57,15 @@ describe("AgentSession out-of-credit handling", () => {
 		calls: () => number;
 		retryEndEvents: RetryEndEvent[];
 	}> {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
-		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 
 		const mock = createMockModel({
 			responses: [{ throw: failure }, { content: ["answered after top-up"], stopReason: "stop" }],
 		});
 		const agent = new Agent({
-			getApiKey: () => "anthropic-test-key",
+			getApiKey: () => "test-key",
 			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
 			streamFn: mock.stream,
 		});

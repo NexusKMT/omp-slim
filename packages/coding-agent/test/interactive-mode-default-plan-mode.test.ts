@@ -72,7 +72,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		cfgStartupQuiet.set(Settings.instance, true);
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {

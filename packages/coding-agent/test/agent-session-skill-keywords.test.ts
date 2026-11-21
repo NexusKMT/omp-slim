@@ -51,9 +51,9 @@ describe("AgentSession skill prompt keyword steering", () => {
 		observedTurns.length = 0;
 
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 		const agent = new Agent({

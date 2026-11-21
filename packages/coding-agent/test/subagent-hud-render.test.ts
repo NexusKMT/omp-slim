@@ -911,7 +911,7 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		});
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 
 		eventBus = new EventBus();
 		session = new AgentSession({

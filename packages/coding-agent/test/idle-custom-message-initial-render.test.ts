@@ -41,7 +41,7 @@ afterAll(() => {
 beforeEach(async () => {
 	tempDir = TempDir.createSync("@pi-idle-initial-render-");
 	authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-	authStorage.keys.setRuntime("openai", "openai-test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 });
 
 afterEach(async () => {
@@ -53,7 +53,7 @@ afterEach(async () => {
 
 /** Interactive transcript wired like InteractiveMode before its initial render, with a pre-render banner. */
 function createInteractiveTranscript() {
-	const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+	const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
 	const agent = new Agent({
 		getApiKey: () => "test-key",
 		initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },

@@ -33,7 +33,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@omp-dispose-release-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -47,7 +47,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	function createSession(): AgentSession {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -195,7 +195,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("drains pending notifications before releasing retained session memory", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -281,7 +281,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("keeps session memory empty when notifications finish after the drain deadline", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -362,7 +362,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("seals the session file at release so an immediate revival owns it exclusively", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({
@@ -546,7 +546,7 @@ describe("AgentSession dispose releases retained memory", () => {
 	});
 
 	it("preserves the agent_end transcript for an asynchronous extension during dispose", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected bundled model");
 		const mock = createMockModel({ handler: () => ({ content: ["ok"] }) });
 		const agent = new Agent({

@@ -112,7 +112,7 @@ describe("AgentSession streaming edit preview recovery", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-streaming-edit-recovery-");
 		authStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -156,7 +156,7 @@ describe("AgentSession streaming edit preview recovery", () => {
 			// only consumes the AgentTool surface.
 			const agentEditTool = editTool as AgentTool;
 
-			const model = createMockModel({ provider: "anthropic", id: "claude-streaming-edit-recovery" }).model;
+			const model = createMockModel({ provider: "test", id: "claude-streaming-edit-recovery" }).model;
 			settings.setModel(`${model.provider}/${model.id}`);
 			const contexts: Context[] = [];
 			let call = 0;

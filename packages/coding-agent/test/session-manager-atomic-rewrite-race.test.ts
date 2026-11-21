@@ -157,7 +157,7 @@ describe("SessionManager atomic rewrite race", () => {
 	it("keeps post-compaction appends on the current JSONL path", async () => {
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		sessionManager.appendMessage({
@@ -272,7 +272,7 @@ describe("SessionManager atomic rewrite race", () => {
 	it("flushSync during an in-flight atomic rewrite durably publishes the exit record", async () => {
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		sessionManager.appendMessage({
@@ -594,7 +594,7 @@ describe("SessionManager atomic rewrite fence spans writer.close()", () => {
 	it("blocks a fresh writer from opening while an in-flight rewrite awaits writer.close()", async () => {
 		const storage = new CloseGatedRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		// Seed an assistant message so the session materializes on disk without
@@ -687,7 +687,7 @@ describe("SessionManager title-change fallback fenced-append durability", () => 
 	it("loops on the dirty flag so fenced appends during the fallback rewrite persist", async () => {
 		const storage = new TitleFallbackPausingStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		// Materialize the session on disk with a title slot present so a later
@@ -758,7 +758,7 @@ describe("SessionManager fence relaxes when flushSync supersedes the atomic rewr
 	it("routes post-flushSync appends onto the hot path so they land on disk before close()", async () => {
 		const storage = new DetachingRewriteStorage();
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		// Materialize a session on disk so subsequent rewrites are meaningful.
@@ -904,7 +904,7 @@ describe("SessionManager fence handoff across superseded rewrites", () => {
 		const storage = new SequencedRewriteStorage();
 		storage.pauseCount = 2;
 		const sessionManager = SessionManager.create("/cwd", "/sessions", storage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model");
 
 		sessionManager.appendMessage({

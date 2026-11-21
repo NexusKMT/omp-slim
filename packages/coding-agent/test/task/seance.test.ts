@@ -274,7 +274,7 @@ describe("seance cold restore", () => {
 	it("revives with whichever bundled read-only tools were persisted and refuses a contract without read", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
 		try {
-			authStorage.keys.setRuntime("anthropic", "test-key");
+			authStorage.keys.setRuntime("test", "test-key");
 			const modelRegistry = new ModelRegistry(authStorage);
 			using tempDir = TempDir.createSync("@omp-seance-restore-");
 			const cwd = tempDir.path();

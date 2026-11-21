@@ -32,7 +32,7 @@ describe("session transitions while a tool runs", () => {
 
 	/** Start a turn whose only tool call settles when the turn is aborted, like `wait` on a long job. */
 	async function startRunningTool(toolName = "wait") {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled Anthropic model");
 		const toolStarted = Promise.withResolvers<void>();
 		const waitTool: AgentTool = {
@@ -78,7 +78,7 @@ describe("session transitions while a tool runs", () => {
 		);
 		const sessionManager = SessionManager.create(tempDir.path(), tempDir.join("sessions"));
 		const authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const settings = Settings.isolated({ "compaction.keepRecentTokens": 1 });
 		cfgCompactionAutoContinue.set(settings, false);

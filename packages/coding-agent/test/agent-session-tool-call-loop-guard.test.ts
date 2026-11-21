@@ -30,7 +30,7 @@ describe("AgentSession tool-call loop guard", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-tool-call-loop-guard-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -40,7 +40,7 @@ describe("AgentSession tool-call loop guard", () => {
 	});
 
 	it("injects a hidden redirect before the next model call", async () => {
-		const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+		const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
 		const modelRegistry = new ModelRegistry(authStorage);
 		const contexts: Context[] = [];
 		const bashTool: AgentTool = {

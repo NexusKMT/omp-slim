@@ -37,10 +37,10 @@ describe("AgentSession queue-mode controls are session-scoped by default", () =>
 		configPath = path.join(agentDir, "config.yml");
 
 		authStorage = await AuthStorage.create(path.join(agentDir, "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 
-		model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }) as Model;
+		model = createTestModel({ provider: "test", id: "test-model" }) as Model;
 		settings = await Settings.loadIsolated({ agentDir, cwd: agentDir });
 
 		session = new AgentSession({

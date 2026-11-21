@@ -15,7 +15,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createTestModel } from "./helpers/test-model";
 
-const OPENAI_TEST_MODEL = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
+const OPENAI_TEST_MODEL = createTestModel({ provider: "test", id: "test-model" });
 
 interface ArgsWithPromptCacheKey extends Args {
 	providerPromptCacheKey?: string;
@@ -52,7 +52,7 @@ async function createMinimalSession(
 	options: CreateAgentSessionOptions,
 ): Promise<{ session: AgentSession; authStorage: AuthStorage }> {
 	const authStorage = await AuthStorage.create(tempDir.join("sdk-auth.db"));
-	authStorage.keys.setRuntime("openai", "test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 	const shouldSupplyModel = options.sessionManager?.getHeader()?.parentSession === undefined;
 	const result = await createAgentSession({
 		...options,

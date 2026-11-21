@@ -65,7 +65,7 @@ describe("BTW session boundaries", () => {
 		directory = TempDir.createSync("@omp-btw-session-lifecycle-");
 		await Settings.init({ inMemory: true, cwd: directory.path() });
 		auth = await AuthStorage.create(path.join(directory.path(), "auth.db"));
-		auth.keys.setRuntime("anthropic", "test-key");
+		auth.keys.setRuntime("test", "test-key");
 		// The slim catalog ships no bundled models; resolve the anthropic model
 		// against a synthetic openai-completions provider instead.
 		const modelsPath = path.join(directory.path(), "models.yml");

@@ -122,7 +122,7 @@ describe("runSubprocess yield reminders", () => {
 		index: 0,
 		id: "subagent-1",
 		settings: Settings.isolated(),
-		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+		parentModel: createTestModel({ provider: "test", id: "test-model" }),
 		modelRegistry: {
 			refresh: async () => {},
 		} as unknown as import("@oh-my-pi/pi-coding-agent/config/model-registry").ModelRegistry,

@@ -54,11 +54,11 @@ describe("AgentSession prompt admission via extension command routing", () => {
 		);
 
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const sessionManager = SessionManager.inMemory();
 		const extensionRunner = new ExtensionRunner([extension], runtime, process.cwd(), sessionManager, modelRegistry);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		const agent = new Agent({
 			getApiKey: () => "test-key",

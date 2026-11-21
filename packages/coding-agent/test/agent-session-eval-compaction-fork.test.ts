@@ -28,7 +28,7 @@ afterEach(async () => {
 it("keeps the compacted eval context in the fork's provider prefix", async () => {
 	auth = await AuthStorage.create(":memory:");
 	const registry = new ModelRegistry(auth);
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected bundled model");
 	const settings = Settings.isolated({ "compaction.keepRecentTokens": 1 });
 	const manager = SessionManager.create(temp.path(), path.join(temp.path(), "sessions"));

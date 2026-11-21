@@ -61,7 +61,7 @@ describe("AgentSession editor-restoring interrupt", () => {
 	});
 
 	async function createSession(responses: MockResponseSource): Promise<Omit<ParkedHarness, "streamStarted">> {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({ responses });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -74,7 +74,7 @@ describe("AgentSession editor-restoring interrupt", () => {
 		const settings = Settings.isolated({ "compaction.enabled": false, "retry.enabled": false });
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
 		return { session, sessionManager, mock };

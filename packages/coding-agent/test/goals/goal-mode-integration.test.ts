@@ -58,9 +58,9 @@ async function createSharedFixture(): Promise<SharedFixture> {
 	const baseDir = TempDir.createSync("@pi-goal-mode-shared-");
 	const authStorage = await AuthStorage.create(path.join(baseDir.path(), "testauth.db"));
 	// The real prompt path gates on a resolvable key; never rely on ambient env.
-	authStorage.keys.setRuntime("anthropic", "test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	return { authStorage, modelRegistry, model, baseDir };
 }
 

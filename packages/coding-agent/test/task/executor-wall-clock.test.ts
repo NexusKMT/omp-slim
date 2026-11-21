@@ -91,7 +91,7 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		id: "subagent-walltime",
 		modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 		enableLsp: false,
-		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+		parentModel: createTestModel({ provider: "test", id: "test-model" }),
 	};
 
 	it("aborts a stalled subagent and surfaces a runtime-limit reason", async () => {

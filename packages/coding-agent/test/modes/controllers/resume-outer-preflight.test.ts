@@ -33,7 +33,7 @@ async function createMode(opts: { flushFails?: boolean } = {}): Promise<{
 
 	const authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 	const modelRegistry = new ModelRegistry(authStorage);
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 
 	const initialTools = await createTools(
 		{ cwd: tempDir.path(), hasUI: false, getSessionFile: () => null, getSessionSpawns: () => "*", settings },

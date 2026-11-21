@@ -30,7 +30,7 @@ describe("goal tool registration when goal mode is enabled at runtime", () => {
 
 	async function makeSession(goalEnabledAtStartup: boolean): Promise<AgentSession> {
 		const authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		const settings = Settings.instance;
@@ -44,7 +44,7 @@ describe("goal tool registration when goal mode is enabled at runtime", () => {
 			authStorage,
 			modelRegistry,
 			settings,
-			model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

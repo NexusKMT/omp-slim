@@ -58,7 +58,7 @@ describe("AgentSession.activeToolExecutionUpdates cache lifecycle", () => {
 	});
 
 	async function makeSession(): Promise<AgentSession> {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -68,7 +68,7 @@ describe("AgentSession.activeToolExecutionUpdates cache lifecycle", () => {
 		});
 		const authStorage = await AuthStorage.create(":memory:");
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		return new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),

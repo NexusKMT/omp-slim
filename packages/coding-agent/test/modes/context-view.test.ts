@@ -12,7 +12,7 @@ import { SessionManager } from "../../src/session/session-manager";
 import { buildSystemPrompt } from "../../src/system-prompt";
 import { createTestModel } from "../helpers/test-model";
 
-const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+const model = createTestModel({ provider: "test", id: "test-model" })!;
 const sessions: AgentSession[] = [];
 afterEach(async () => {
 	for (const session of sessions.splice(0)) await session.dispose();

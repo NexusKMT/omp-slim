@@ -354,7 +354,7 @@ describe("delta message updates over a real session run", () => {
 	])(
 		"every streamed message rebuilds from delta frames alone and matches the full-mode message (%s)",
 		async (_name, paced) => {
-			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+			const model = createTestModel({ provider: "test", id: "test-model" })!;
 			let turn = 0;
 			// Mutates one partial message in place and yields between events, like a provider reading a socket.
 			const streamFn = (streamModel: Model, _context: Context) => {
@@ -419,7 +419,7 @@ describe("delta message updates over a real session run", () => {
 
 			tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rpc-delta-rebuild-"));
 			const authStorage = await AuthStorage.create(":memory:");
-			authStorage.keys.setRuntime("anthropic", "test-key");
+			authStorage.keys.setRuntime("test", "test-key");
 			const agent = new Agent({
 				getApiKey: () => "test-key",
 				initialState: { model, systemPrompt: ["Test"], tools: [] },

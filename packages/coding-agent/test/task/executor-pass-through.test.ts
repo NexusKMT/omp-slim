@@ -102,7 +102,7 @@ const baseOptions = {
 	id: "subagent-pass-through",
 	settings: Settings.isolated(),
 	modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
-	parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+	parentModel: createTestModel({ provider: "test", id: "test-model" }),
 	enableLsp: false,
 };
 

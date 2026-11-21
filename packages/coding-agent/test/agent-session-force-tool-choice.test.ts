@@ -21,11 +21,11 @@ let mock: MockModel;
 
 beforeEach(() => {
 	tempDir = TempDir.createSync("@pi-agent-session-force-tool-");
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 	authStorage = createInMemoryAuthStorage();
-	authStorage.keys.setRuntime("anthropic", "test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 	const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	const settings = Settings.isolated({ "compaction.enabled": false });
 	sessionManager = SessionManager.inMemory(tempDir.path());

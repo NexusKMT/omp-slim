@@ -36,7 +36,7 @@ describe("issue #2510 — /plan toggles plan → plan_paused → none", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const defaultModel = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const defaultModel = createTestModel({ provider: "test", id: "test-model" });
 
 		session = new AgentSession({
 			agent: new Agent({

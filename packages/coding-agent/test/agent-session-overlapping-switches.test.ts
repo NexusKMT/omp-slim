@@ -38,7 +38,7 @@ describe("overlapping session switches", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-overlapping-switches-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -50,7 +50,7 @@ describe("overlapping session switches", () => {
 
 	function createSession(): AgentSession {
 		const mock = createMockModel({
-			provider: "openai",
+			provider: "test",
 			id: "gpt-test",
 			handler: () => ({ content: ["noted"] }),
 		});

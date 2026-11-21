@@ -76,7 +76,7 @@ describe("issue #6516 — tool output appears twice", () => {
 		}
 
 		tempDir = TempDir.createSync("@pi-issue-6516-");
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),

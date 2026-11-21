@@ -99,7 +99,7 @@ describe("autoloadSkills in executor", () => {
 			refresh: async () => {},
 		} as unknown as import("@oh-my-pi/pi-coding-agent/config/model-registry").ModelRegistry,
 		enableLsp: false,
-		parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+		parentModel: createTestModel({ provider: "test", id: "test-model" }),
 	};
 
 	it("calls sendCustomMessage for each autoloaded skill before prompt", async () => {
@@ -288,7 +288,7 @@ describe("autoloadSkills through task spawn", () => {
 				getSessionSpawns: () => "*",
 				getSessionAgents: () => [],
 				getPlanModeState: () => undefined,
-				getActiveModel: () => createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+				getActiveModel: () => createTestModel({ provider: "test", id: "test-model" }),
 				get skills() {
 					return parentSkills;
 				},

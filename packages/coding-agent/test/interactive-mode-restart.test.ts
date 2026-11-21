@@ -44,7 +44,7 @@ describe("InteractiveMode restart", () => {
 
 	async function restart(argv: string[]): Promise<string[]> {
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["test"], tools: [], messages: [] } }),
 			sessionManager,

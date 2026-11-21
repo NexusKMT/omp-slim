@@ -37,7 +37,7 @@ describe("AgentSession persistence-keys cache", () => {
 		fs.mkdirSync(tempDir, { recursive: true });
 
 		const tools: AgentTool[] = [];
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
 			throw new Error("bundled model claude-sonnet-4-5 not found");
 		}

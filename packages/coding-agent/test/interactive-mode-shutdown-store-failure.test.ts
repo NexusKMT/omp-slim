@@ -50,7 +50,7 @@ describe("InteractiveMode shutdown when the session store keeps failing (#12238)
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		// File-backed (not inMemory): the failure under test comes from the real
 		// storage backend's write path.
 		sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));

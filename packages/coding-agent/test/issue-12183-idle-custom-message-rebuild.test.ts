@@ -41,7 +41,7 @@ beforeAll(async () => {
 	await Settings.init({ inMemory: true });
 	await initTheme();
 	authStorage = createInMemoryAuthStorage();
-	authStorage.keys.setRuntime("openai", "openai-test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 });
 
 afterAll(() => {
@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 async function createHarness() {
-	const model = createMockModel({ provider: "openai", id: "gpt-test" }).model;
+	const model = createMockModel({ provider: "test", id: "gpt-test" }).model;
 	const assistantWithToolCall = {
 		...createAssistantMessage(""),
 		content: [{ type: "toolCall" as const, id: "call-1", name: "bash", arguments: { command: "echo hi" } }],

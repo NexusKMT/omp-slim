@@ -26,7 +26,7 @@ describe("issue #12247 mid-turn transcript rebuild", () => {
 	beforeAll(() => {
 		tempDir = TempDir.createSync("@pi-issue-12247-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -52,7 +52,7 @@ describe("issue #12247 mid-turn transcript rebuild", () => {
 
 	function createSession() {
 		const mock = createMockModel({
-			provider: "anthropic",
+			provider: "test",
 			responses: [
 				{ content: [{ type: "toolCall", id: "live", name: "probe", arguments: {} }] },
 				{ content: ["done"] },

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 function fixture(): { component: StatusLineComponent; render: () => string } {
-	const model: Model = createTestModel({ provider: "deepseek", id: "deepseek-v4-flash" });
+	const model: Model = createTestModel({ provider: "test", id: "test-model" });
 	const session = {
 		state: { model, messages: [] },
 		model,

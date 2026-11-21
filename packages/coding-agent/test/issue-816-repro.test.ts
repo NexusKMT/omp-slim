@@ -30,9 +30,9 @@ describe("issue #816 — plan mode pendingModelSwitch leak", () => {
 		tempDir = TempDir.createSync("@pi-issue-816-");
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
-		const defaultModel = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const defaultModel = createTestModel({ provider: "test", id: "test-model" });
 
 		session = new AgentSession({
 			agent: new Agent({

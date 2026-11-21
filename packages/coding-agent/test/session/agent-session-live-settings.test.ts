@@ -57,7 +57,7 @@ describe("AgentSession live settings", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

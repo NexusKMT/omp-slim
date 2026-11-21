@@ -47,7 +47,7 @@ describe("AgentSession.resume", () => {
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-resume-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 	});
 
@@ -72,7 +72,7 @@ describe("AgentSession.resume", () => {
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
-				model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!,
+				model: createTestModel({ provider: "test", id: "test-model" })!,
 				systemPrompt: ["Test"],
 				tools: [],
 			},

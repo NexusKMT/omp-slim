@@ -112,8 +112,8 @@ describe("snapcompact archive read by another model", () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-snapcompact-reader-"));
 		setAgentDir(path.join(tempDir, "agent"));
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("openai", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 

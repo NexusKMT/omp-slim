@@ -62,7 +62,7 @@ async function createSessionWithObfuscator(
 	modelRegistry: ModelRegistry,
 	obfuscator?: SecretObfuscator,
 ): Promise<SessionFixture> {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 	const agent = new Agent({
@@ -94,7 +94,7 @@ describe("AgentSession silent-abort marker stamping", () => {
 	beforeAll(async () => {
 		fixtureDir = TempDir.createSync("@pi-silent-abort-fixture-");
 		authStorage = await AuthStorage.create(path.join(fixtureDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 	afterEach(async () => {

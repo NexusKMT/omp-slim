@@ -22,7 +22,7 @@ async function createContextSession(
 	options: {} = {},
 ): Promise<{ session: AgentSession; authStorage: AuthStorage; sessionManager: SessionManager }> {
 	const authStorage = await AuthStorage.create(`${cwd}/auth.db`);
-	const model = createTestModel({ provider: "openai", id: "gpt-4o-mini" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	const modelRegistry = new ModelRegistry(authStorage, `${cwd}/models.json`);
 	const sessionManager = SessionManager.inMemory(cwd);
 	const { session } = await createAgentSession({

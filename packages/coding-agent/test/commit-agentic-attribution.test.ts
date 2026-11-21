@@ -25,7 +25,7 @@ describe("commit agent prompt attribution", () => {
 		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({ session } as unknown as CreateAgentSessionResult);
 		vi.spyOn(toolsModule, "createCommitTools").mockReturnValue([]);
 
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
 			throw new Error("Expected claude-sonnet-4-5 model to exist");
 		}
@@ -72,7 +72,7 @@ describe("commit agent prompt attribution", () => {
 			return [];
 		});
 
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) {
 			throw new Error("Expected claude-sonnet-4-5 model to exist");
 		}

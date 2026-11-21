@@ -25,15 +25,15 @@ describe("Context usage consolidation", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-context-shared-");
 		authStorage = await AuthStorage.create(path.join(sharedDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("openai", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 		await Settings.init({ inMemory: true });
 		await initTheme();
 
 		mockModel = createMockModel({
 			id: "gpt-mock",
-			provider: "openai",
+			provider: "test",
 			contextWindow: 100_000,
 			responses: [
 				{

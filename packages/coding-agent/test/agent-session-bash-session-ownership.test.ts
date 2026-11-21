@@ -36,7 +36,7 @@ describe("AgentSession bash session ownership", () => {
 		tempDir = TempDir.createSync("@pi-bash-session-owner-");
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		additionalManagers = [];
 	});
 
@@ -54,7 +54,7 @@ describe("AgentSession bash session ownership", () => {
 		extensionRunner?: ExtensionRunner,
 		responseContent: () => string[] = () => ["Done"],
 	): AgentSession {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		const mock = createMockModel({ handler: () => ({ content: responseContent() }) });
 		const agent = new Agent({

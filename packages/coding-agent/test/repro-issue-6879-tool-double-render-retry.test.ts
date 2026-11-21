@@ -87,7 +87,7 @@ describe("issue #6879 — tool output appears twice after a superseded turn", ()
 		}
 
 		tempDir = TempDir.createSync("@pi-issue-6879-");
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),

@@ -164,7 +164,7 @@ describe("InteractiveMode plan review rendering", () => {
 		sharedTempDir = TempDir.createSync("@pi-plan-review-shared-");
 		await Settings.init({ inMemory: true, cwd: sharedTempDir.path() });
 		authStorage = await AuthStorage.create(path.join(sharedTempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		// The slim catalog ships no bundled models; resolve the anthropic model
 		// against a synthetic openai-completions provider instead.
 		const modelsPath = path.join(sharedTempDir.path(), "models.yml");

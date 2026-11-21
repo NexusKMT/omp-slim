@@ -168,10 +168,10 @@ describe("InputController orphaned submit", () => {
 		let session: AgentSession | undefined;
 		let authStorage: AuthStorage | undefined;
 		try {
-			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+			const model = createTestModel({ provider: "test", id: "test-model" });
 			if (!model) throw new Error("Expected built-in anthropic model to exist");
 			authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-			authStorage.keys.setRuntime("anthropic", "test-key");
+			authStorage.keys.setRuntime("test", "test-key");
 			const agent = new Agent({
 				initialState: {
 					model,

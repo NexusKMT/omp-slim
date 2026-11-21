@@ -129,9 +129,9 @@ describe("AgentSession auto-snapcompact local-blocker fallback", () => {
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("aimlapi", "test-key");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("openai", "test-key");
-		authStorage.keys.setRuntime("deepseek", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 

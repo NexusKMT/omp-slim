@@ -48,7 +48,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 	const archives: string[] = [];
 
 	function createSession(prompt: string): AgentSession {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled anthropic model");
 		const authStorage = createInMemoryAuthStorage();
 		return new AgentSession({
@@ -249,7 +249,7 @@ describe("AgentSession.dumpSessionArchiveToTmpDir", () => {
 	it("reports malformed records skipped while loading the main session", async () => {
 		const file = path.join(tempDir.path(), "corrupt.jsonl");
 		await Bun.write(file, `${subagentJsonl("main", "hello")}{"type":"message","id":"broken`);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled anthropic model");
 		const reopened = new AgentSession({
 			agent: new Agent({

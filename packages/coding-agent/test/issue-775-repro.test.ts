@@ -30,13 +30,13 @@ describe("issue #775: per-model defaultLevel", () => {
 	});
 
 	function getOpus() {
-		const model = createTestModel({ provider: "anthropic", id: "claude-opus-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected claude-opus-4-5");
 		return model;
 	}
 
 	function getSonnet() {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("expected claude-sonnet-4-5");
 		return model;
 	}
@@ -53,7 +53,7 @@ describe("issue #775: per-model defaultLevel", () => {
 		});
 		const authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
 		session = new AgentSession({
 			agent,

@@ -24,7 +24,7 @@ describe("AgentSession text-only stream stall", () => {
 	beforeAll(async () => {
 		tempDir = TempDir.createSync("@pi-text-stall-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -39,7 +39,7 @@ describe("AgentSession text-only stream stall", () => {
 	});
 
 	it("continues after committed text instead of stopping on the stall", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected bundled Anthropic test model to exist");
 
 		const mock = createMockModel({

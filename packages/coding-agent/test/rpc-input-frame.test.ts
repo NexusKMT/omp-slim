@@ -583,10 +583,10 @@ describe("RpcInputDispatcher", () => {
 
 	test("a prompt blocked on admission does not hold up abort (RPC queue must keep flowing during vision preprocessing)", async () => {
 		const authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const sessionManager = SessionManager.inMemory();
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		const mock = createMockModel({ responses: [{ content: ["should not run before release"] }] });
 		const agent = new Agent({

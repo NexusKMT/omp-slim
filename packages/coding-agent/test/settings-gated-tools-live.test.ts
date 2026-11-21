@@ -46,7 +46,7 @@ describe("settings-gated tools in a live session", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			enableMCP: false,
 			enableLsp: false,

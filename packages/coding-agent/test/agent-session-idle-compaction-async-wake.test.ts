@@ -127,15 +127,15 @@ describe("AgentSession idle compaction async-job deferral", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-idle-compaction-async-wake-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		manager = new AsyncJobManager({ onJobComplete: async () => {} });
 		gates = [];
 
 		const mock = createMockModel({
-			provider: "anthropic",
-			id: "claude-sonnet-4-5",
+			provider: "test",
+			id: "test-model",
 			handler: () => ({ content: ["mock reply"] }),
 		});
 

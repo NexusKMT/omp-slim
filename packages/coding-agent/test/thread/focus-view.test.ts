@@ -70,7 +70,7 @@ async function mainRegistry(): Promise<ModelRegistry> {
 	const modelsPath = path.join(dir, "models.json");
 	await Bun.write(modelsPath, JSON.stringify({ providers: {} }));
 	const authStorage = await AuthStorage.create(":memory:");
-	authStorage.keys.setRuntime("anthropic", "test-key");
+	authStorage.keys.setRuntime("test", "test-key");
 	cleanups.push(async () => {
 		authStorage.close();
 		await fs.rm(dir, { recursive: true, force: true });

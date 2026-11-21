@@ -119,7 +119,7 @@ describe("AgentSession approved-plan reference re-injection after compaction (is
 	beforeAll(async () => {
 		fixtureDir = TempDir.createSync("@pi-agent-session-plan-ref-compaction-fixture-");
 		authStorage = await AuthStorage.create(path.join(fixtureDir.path(), "testauth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, path.join(fixtureDir.path(), "models.yml"));
 	});
 
@@ -147,7 +147,7 @@ describe("AgentSession approved-plan reference re-injection after compaction (is
 			resolve: (call: ObservedPromptCall) => void;
 		}> = [];
 
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) throw new Error("Expected claude-sonnet-4-5 model to exist");
 		// Pin the context window so the fixed 191k high-usage turn stays above the
 		// compaction threshold across catalog regenerations: claude-sonnet-4-5's

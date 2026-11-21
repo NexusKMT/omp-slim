@@ -41,8 +41,8 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		authStorage.keys.setRuntime("deepseek", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 	});
 
@@ -125,7 +125,7 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 			);
 		}
 
-		const bundled = options.model ?? createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const bundled = options.model ?? createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) {
 			throw new Error("Expected built-in anthropic model to exist");
 		}

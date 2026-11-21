@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 function assistantMessage(text: string) {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected built-in anthropic model to exist");
 	return {
 		role: "assistant" as const,

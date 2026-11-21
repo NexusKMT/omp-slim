@@ -130,7 +130,7 @@ describe("AgentSession interrupted thinking persistence", () => {
 	beforeEach(() => {
 		tempDir = TempDir.createSync("@pi-interrupted-thinking-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 	});
 
 	afterEach(async () => {
@@ -148,14 +148,14 @@ describe("AgentSession interrupted thinking persistence", () => {
 	// axis is `thinking.mode === "effort"`, which is what replays reasoning.
 	function createSession(
 		extensionRunner?: ExtensionRunner,
-		model: Model<Api> = createTestModel({ provider: "openai", id: "gpt-5.2" }),
+		model: Model<Api> = createTestModel({ provider: "test", id: "test-model" }),
 	): {
 		model: Model<Api>;
 		sessionManager: SessionManager;
 		session: AgentSession;
 	} {
 		const agent = new Agent({
-			getApiKey: () => "anthropic-test-key",
+			getApiKey: () => "test-key",
 			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
 			convertToLlm,
 		});

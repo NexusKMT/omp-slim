@@ -199,7 +199,7 @@ describe("EventController — ending the wait on a real session", () => {
 
 	it("folds a job result that lands after the wait was ended into context without starting a turn", async () => {
 		tempDir = TempDir.createSync("@pi-async-wait-esc-");
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 		const mock = createMockModel({
 			responses: [{ content: ["job started"], stopReason: "stop" }],
@@ -212,7 +212,7 @@ describe("EventController — ending the wait on a real session", () => {
 		});
 		const sessionManager = SessionManager.inMemory(tempDir.path());
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		manager = new AsyncJobManager({});
 		session = new AgentSession({
 			agent,

@@ -38,7 +38,7 @@ describe("InteractiveMode paused-plan guard message", () => {
 	beforeEach(async () => {
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		vi.spyOn(modelRegistry, "getApiKey").mockResolvedValue("test-key");
 		session = new AgentSession({
 			agent: new Agent({

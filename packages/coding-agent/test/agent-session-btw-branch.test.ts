@@ -79,7 +79,7 @@ describe("AgentSession.branchFromBtw", () => {
 		handler?: MockHandler;
 		model?: Model<Api>;
 	}) {
-		const model = options?.model ?? createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = options?.model ?? createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({ handler: options?.handler ?? (() => ({ content: ["unused"] })) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -91,7 +91,7 @@ describe("AgentSession.branchFromBtw", () => {
 		const settings = Settings.isolated({ "compaction.enabled": false });
 		authStorage = await AuthStorage.create(":memory:");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		session = new AgentSession({
 			agent,
 			sessionManager,
@@ -162,7 +162,7 @@ describe("AgentSession.branchFromBtw", () => {
 			.spyOn(imageVisionFallback, "describeAttachedImagesForTextModel")
 			.mockResolvedValue([{ type: "text", text: "A red square." }]);
 		const activeSession = await createSession({
-			model: { ...createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!, input: [...input] },
+			model: { ...createTestModel({ provider: "test", id: "test-model" })!, input: [...input] },
 		});
 		activeSession.sessionManager.appendMessage({ role: "user", content: "seed", timestamp: Date.now() });
 		await activeSession.sessionManager.flush();

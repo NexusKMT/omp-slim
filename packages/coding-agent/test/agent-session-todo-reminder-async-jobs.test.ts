@@ -50,7 +50,7 @@ import { createTestModel } from "./helpers/test-model";
  * decided whether to fire the stop-time passes. No wall-clock sleeps needed.
  */
 const sharedAuthStorage = createInMemoryAuthStorage();
-sharedAuthStorage.keys.setRuntime("anthropic", "test-key");
+sharedAuthStorage.keys.setRuntime("test", "test-key");
 const sharedModelRegistry = new ModelRegistry(sharedAuthStorage);
 
 afterAll(() => {
@@ -131,7 +131,7 @@ describe("AgentSession todo reminder async-job deferral", () => {
 			emitSessionStop: vi.fn().mockResolvedValue(undefined),
 		} as unknown as ExtensionRunner;
 
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected built-in anthropic model to exist");
 
 		const settings = Settings.isolated({

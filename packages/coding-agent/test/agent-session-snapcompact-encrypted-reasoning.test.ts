@@ -34,11 +34,11 @@ describe("AgentSession snapcompact no-reduction guard: opaque reasoning", () => 
 
 	beforeEach(async () => {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage);
 		sessionManager = SessionManager.inMemory();
 
-		const bundled = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const bundled = createTestModel({ provider: "test", id: "test-model" });
 		if (!bundled) throw new Error("Expected bundled claude-sonnet-4-5 model");
 		const model = { ...bundled, contextWindow: 200_000, maxTokens: 64_000 };
 

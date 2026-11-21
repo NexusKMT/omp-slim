@@ -47,8 +47,8 @@ async function createSession(
 	{ autoTitle = true, todo = false }: { autoTitle?: boolean; todo?: boolean } = {},
 ): Promise<AgentSession> {
 	authStorage = await AuthStorage.create(":memory:");
-	authStorage.keys.setRuntime("anthropic", "test-key");
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	authStorage.keys.setRuntime("test", "test-key");
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 	const sessionManager = SessionManager.inMemory();
 	const sessionSettings = Settings.isolated({

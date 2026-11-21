@@ -51,8 +51,8 @@ describe("context command viewer", () => {
 
 	it("keeps /context focused fullscreen while a real pending turn continues, restoring draft without abort or submission", async () => {
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		const model = createTestModel({ provider: "test", id: "test-model" });
+		authStorage.keys.setRuntime("test", "test-key");
 		const entered = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
 		let requests = 0;

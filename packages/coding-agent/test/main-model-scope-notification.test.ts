@@ -5,7 +5,7 @@ import { createTestModel } from "./helpers/test-model";
 
 function scopedModel(id: string): ScopedModel {
 	return {
-		model: createTestModel({ provider: "anthropic", id: id }),
+		model: createTestModel({ provider: "test", id: id }),
 		explicitThinkingLevel: false,
 	};
 }

@@ -107,7 +107,7 @@ function revivalParent(cwd: string, preparedExtensions: PreparedExtension[]): Ag
 			getCwd: () => cwd,
 			getArtifactManager: () => undefined,
 		},
-		model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+		model: createTestModel({ provider: "test", id: "test-model" }),
 		effectiveExtensionRoots: {
 			explicit: ["/fixture/hostile-seance-extension.ts"],
 			mode: "explicit-only",
@@ -147,10 +147,10 @@ describe("seance startup contracts", () => {
 		const sourceFile = path.join(tempDir.path(), "source.jsonl");
 		const sourceText = await writeSourceSession(sourceFile, cwd, [sourceRoot]);
 		const forked = await forkSeance(sourceFile, cwd, path.join(tempDir.path(), "forks", "seance.jsonl"));
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
 		const authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const extensionPath = path.join(tempDir.path(), "hostile-extension.ts");
 		const extensionMarker = path.join(tempDir.path(), "extension-loaded.txt");
@@ -218,7 +218,7 @@ describe("seance startup contracts", () => {
 		const agent = getBundledAgent("seance");
 		if (!agent) throw new Error("Expected the bundled seance agent");
 		const authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const previousAgentDir = getAgentDir();
 		setAgentDir(path.join(tempDir.path(), "agent"));
@@ -256,7 +256,7 @@ describe("seance startup contracts", () => {
 				id,
 				settings: Settings.isolated(),
 				modelRegistry,
-				parentModel: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+				parentModel: createTestModel({ provider: "test", id: "test-model" }),
 				preparedSession: preparedSourceSession(sourceFile, "source-session"),
 				artifactsDir,
 				preloadedPreparedExtensions: [extension],
@@ -307,7 +307,7 @@ describe("seance startup contracts", () => {
 		const sessionFile = forked.getSessionFile();
 		if (!sessionFile) throw new Error("Expected a persisted fork");
 		const authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage);
 		const seanceSettings = Settings.isolated({
 			"workspace.additionalDirectories": [settingsRoot],
@@ -321,7 +321,7 @@ describe("seance startup contracts", () => {
 		try {
 			const seanceAgent = getBundledAgent("seance");
 			if (!seanceAgent) throw new Error("Expected the bundled seance agent");
-			const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+			const model = createTestModel({ provider: "test", id: "test-model" });
 			if (!model) throw new Error("Expected anthropic/claude-sonnet-4-5");
 			const resolvedModel = `${model.provider}/${model.id}`;
 			const subagentPrompt = prompt.render(subagentSystemPromptTemplate, {

@@ -89,11 +89,11 @@ describe("AgentSession eager task prelude", () => {
 		agentKind?: "main" | "sub",
 	): Harness {
 		const observedCalls: ObservedPromptCall[] = [];
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 		const authStorage = createInMemoryAuthStorage();
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), `models-${harnesses.length}.yml`));
 		const settings = Settings.isolated({
 			"compaction.enabled": false,

@@ -63,7 +63,7 @@ describe("experimental context tool registration", () => {
 				sessionManager,
 				settings: Settings.isolated({ "compaction.experimentalContextManagement": true }),
 				modelRegistry: new ModelRegistry(authStorage),
-				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+				model: createTestModel({ provider: "test", id: "test-model" }),
 				toolNames: ["read", "grep"],
 				disableExtensionDiscovery: true,
 				skills: [],

@@ -26,7 +26,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-model-switch-auth-");
 		authStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		registry = new ModelRegistry(authStorage, path.join(sharedDir.path(), "models.yml"));
 	});
 
@@ -44,7 +44,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 	});
 
 	function modelOrThrow(id: string): Model<Api> {
-		const model = createTestModel({ provider: "anthropic", id: id });
+		const model = createTestModel({ provider: "test", id: id });
 		if (!model) throw new Error(`Expected anthropic model ${id} to exist`);
 		return model;
 	}

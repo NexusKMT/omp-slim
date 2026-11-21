@@ -20,7 +20,7 @@ const NUMSTAT = [{ path: "src/a.ts", added: 1, removed: 0 }];
 let authStorage: AuthStorage | undefined;
 
 function mockModelResolution() {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 	vi.spyOn(sdkModule, "loadCliExtensionProviders").mockResolvedValue(undefined);
 	vi.spyOn(modelSelection, "resolvePrimaryModel").mockResolvedValue({

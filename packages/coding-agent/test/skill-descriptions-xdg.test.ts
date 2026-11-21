@@ -150,11 +150,11 @@ describe("skill description failure caching and shutdown", () => {
 	function modelCompressor(stopReason: AssistantMessage["stopReason"]): SkillDescriptionCompressor {
 		const authStorage = createInMemoryAuthStorage();
 		authStorages.push(authStorage);
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const settings = Settings.isolated({});
 		const registry = new ModelRegistry(authStorage, path.join(tempDir, "models.yml"), { settings });
 		const compressor = createSkillDescriptionCompressor(registry, {
-			getModel: () => createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+			getModel: () => createTestModel({ provider: "test", id: "test-model" }),
 			completeImpl: async () => ({
 				...createAssistantMessage(compressed),
 				stopReason,

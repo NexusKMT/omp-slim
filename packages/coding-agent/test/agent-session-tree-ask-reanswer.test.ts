@@ -23,7 +23,7 @@ import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import { describe, expect, it, vi } from "bun:test";
 import { createTestModel } from "./helpers/test-model";
 
-const TEST_MODEL = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+const TEST_MODEL = createTestModel({ provider: "test", id: "test-model" })!;
 
 async function createTestSession(
 	options: { inMemory?: boolean; extensionRunner?: ExtensionRunner; obfuscator?: SecretObfuscator } = {},

@@ -116,7 +116,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
@@ -170,7 +170,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
@@ -200,7 +200,7 @@ describe("structured output sidecar lifecycle", () => {
 			settings: Settings.isolated(),
 			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
 			enableLsp: false,
-			parentModel: createTestModel({ provider: "openai", id: "gpt-4.1-mini" }),
+			parentModel: createTestModel({ provider: "test", id: "test-model" }),
 			artifactsDir,
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});

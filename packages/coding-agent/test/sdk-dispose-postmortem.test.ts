@@ -65,7 +65,7 @@ describe("createAgentSession dispose releases postmortem registrations", () => {
 				modelRegistry,
 				sessionManager: SessionManager.inMemory(),
 				settings: Settings.isolated({}),
-				model: createTestModel({ provider: "openai", id: "gpt-4o-mini" }),
+				model: createTestModel({ provider: "test", id: "test-model" }),
 				hasUI: true,
 				bindProcessState: false,
 				enableMCP: true,

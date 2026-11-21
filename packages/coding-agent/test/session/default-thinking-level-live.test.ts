@@ -54,7 +54,7 @@ describe("defaultThinkingLevel on running sessions", () => {
 			modelRegistry,
 			sessionManager: SessionManager.inMemory(),
 			settings,
-			model: createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" }),
+			model: createTestModel({ provider: "test", id: "test-model" }),
 			disableExtensionDiscovery: true,
 			skills: [],
 			contextFiles: [],

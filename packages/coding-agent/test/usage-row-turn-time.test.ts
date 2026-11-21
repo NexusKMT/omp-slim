@@ -446,7 +446,7 @@ describe("AgentSession synthetic follow-up marking", () => {
 		sharedDir = path.join(os.tmpdir(), `pi-turn-time-shared-${Snowflake.next()}`);
 		fs.mkdirSync(sharedDir, { recursive: true });
 		authStorage = await AuthStorage.create(path.join(sharedDir, "auth.db"));
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		modelRegistry = new ModelRegistry(authStorage, path.join(sharedDir, "models.yml"));
 	});
 	afterAll(() => {
@@ -455,7 +455,7 @@ describe("AgentSession synthetic follow-up marking", () => {
 	});
 
 	it("marks a queued synthetic follow-up as a run-initiating developer message", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({ handler: () => ({ content: ["Done"] }) });
 		const agent = new Agent({
 			getApiKey: () => "test-key",
@@ -483,7 +483,7 @@ describe("AgentSession synthetic follow-up marking", () => {
 		}
 	});
 	it("persists a user-attributed custom prompt with its original submission timestamp", async () => {
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" })!;
+		const model = createTestModel({ provider: "test", id: "test-model" })!;
 		const mock = createMockModel({
 			// Real provider delay: the session's internal settle timers use the
 			// platform clock, so fake timers would freeze both the submission and

@@ -33,7 +33,7 @@ describe("AgentSession peek at consumed background completions", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-consumed-completion-peek-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.keys.setRuntime("openai", "openai-test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		manager = new AsyncJobManager({});
 		AsyncJobManager.setInstance(manager);
 		gates = [];
@@ -59,7 +59,7 @@ describe("AgentSession peek at consumed background completions", () => {
 	}
 
 	function createSession(responses: MockHandler[], options: { launch?: boolean } = {}): AgentSession {
-		const mock = createMockModel({ provider: "openai", id: "gpt-test", responses });
+		const mock = createMockModel({ provider: "test", id: "gpt-test", responses });
 		const wait = new WaitTool({
 			cwd: tempDir.path(),
 			settings: Settings.isolated({ "launch.enabled": options.launch ?? false }),

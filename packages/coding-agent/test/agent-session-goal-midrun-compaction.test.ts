@@ -69,7 +69,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 	beforeAll(async () => {
 		sharedDir = TempDir.createSync("@pi-agent-goal-midrun-compaction-shared-");
 		sharedAuthStorage = await AuthStorage.create(path.join(sharedDir.path(), "auth.db"));
-		sharedAuthStorage.keys.setRuntime("anthropic", "test-key");
+		sharedAuthStorage.keys.setRuntime("test", "test-key");
 		sharedModelRegistry = new ModelRegistry(sharedAuthStorage, path.join(sharedDir.path(), "models.yml"));
 	});
 
@@ -107,7 +107,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 		sessionManager: SessionManager;
 	}> {
 		const observedContexts: string[][] = [];
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		if (!model) throw new Error("Expected claude-sonnet-4-5 model to exist");
 
 		const modelRegistry = sharedModelRegistry;

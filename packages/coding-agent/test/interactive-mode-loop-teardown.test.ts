@@ -42,7 +42,7 @@ describe("InteractiveMode shutdown during a loop condition gate", () => {
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
-		const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+		const model = createTestModel({ provider: "test", id: "test-model" });
 		session = new AgentSession({
 			agent: new Agent({ initialState: { model, systemPrompt: ["test"], tools: [], messages: [] } }),
 			sessionManager: SessionManager.inMemory(tempDir.path()),

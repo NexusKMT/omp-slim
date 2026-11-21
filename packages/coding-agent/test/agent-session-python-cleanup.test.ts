@@ -72,7 +72,7 @@ class FakeKernel {
 }
 
 const getModel = () => {
-	const model = createTestModel({ provider: "anthropic", id: "claude-sonnet-4-5" });
+	const model = createTestModel({ provider: "test", id: "test-model" });
 	if (!model) throw new Error("Expected bundled model");
 	return model;
 };

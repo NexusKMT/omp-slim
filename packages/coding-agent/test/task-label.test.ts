@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createTestModel } from "./helpers/test-model";
 
 function getModelOrThrow(id: string): Model<Api> {
-	const model = createTestModel({ provider: "anthropic", id: id });
+	const model = createTestModel({ provider: "test", id: id });
 	if (!model) throw new Error(`Expected model ${id}`);
 	return model;
 }

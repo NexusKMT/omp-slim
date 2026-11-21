@@ -47,7 +47,7 @@ describe("AgentSession prompt admission racing abort", () => {
 		} = {},
 	) {
 		authStorage = await AuthStorage.create(":memory:");
-		authStorage.keys.setRuntime("anthropic", "test-key");
+		authStorage.keys.setRuntime("test", "test-key");
 		const bundled: Model = buildModel({
 			id: "claude-sonnet-4-5",
 			name: "Claude Sonnet 4.5",
