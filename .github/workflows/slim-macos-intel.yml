@@ -458,12 +458,9 @@ jobs:
                  ~/.cargo/git
                  ${{ runner.temp }}/omp-slim-development-cargo
               key: slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
-              # Manifest comments also change hashFiles. Keep a same-host/profile
-              # fallback; Cargo still checks compiler, flags and dependency freshness.
               restore-keys: |
                  slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
-                 slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-
 
          - name: Install pinned toolchains and dependencies
            id: development-toolchains
@@ -593,8 +590,6 @@ jobs:
                  slim-macos15-intel-xcode16.4-compiler-v1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v2-inc1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
-                 slim-macos15-intel-xcode16.4-compiler-v2-inc1-front${{ matrix.threads }}-
-                 slim-macos15-intel-xcode16.4-development-v2-inc1-dev-
 
          - name: Install toolchains and record exact versions
            id: compiler-toolchains
