@@ -6,11 +6,12 @@ import { containsVersionStamp, VERSION_STAMP_MAGIC } from "../native/version-sen
 const defaultNativeDir = path.join(import.meta.dir, "../native");
 
 /**
- * zstd level for embedded addons. Each addon is its own frame with no
- * container header or timestamp, so identical addon bytes always embed
- * identically and consecutive binaries differ only where the addon did.
+ * zstd level for embedded addons. Level 12 keeps frames compact without the
+ * disproportionate preparation cost of level 19. Each addon is its own frame
+ * with no container header or timestamp, so identical addon bytes always
+ * embed identically and consecutive binaries differ only where the addon did.
  */
-export const EMBEDDED_ADDON_ZSTD_LEVEL = 19;
+export const EMBEDDED_ADDON_ZSTD_LEVEL = 12;
 
 /** Platform/architecture pair whose addons a standalone binary embeds. */
 export interface NativeEmbedTarget {
