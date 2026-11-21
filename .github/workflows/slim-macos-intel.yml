@@ -99,8 +99,12 @@ jobs:
               # pi-shell's src/minimizer/defs); cargo tracks the dir mtime,
               # which checkout stamps with the checkout time. Pin every
               # tracked dir to the same epoch so dir entries are not newer
-              # than the recorded build.
-              git ls-files -z | xargs -0 -n1 dirname | sort -zu | xargs -0 touch -t 202001010000.00
+              # than the recorded build. git ls-tree lists dirs NUL-terminated
+              # in one process; dirname|sort -zu would feed sort newline
+              # records as a single giant NUL record (BSD sort), so one
+              # multi-kilobyte path reaches touch as ENAMETOOLONG.
+              { git ls-tree -d -r -z --name-only HEAD; printf '.\0'; } \
+                | xargs -0 touch -t 202001010000.00
 
          - name: Dump restored cargo state for cache diagnostics
            shell: bash
@@ -454,9 +458,12 @@ jobs:
                  ~/.cargo/git
                  ${{ runner.temp }}/omp-slim-development-cargo
               key: slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-${{ github.sha }}
+              # Manifest comments also change hashFiles. Keep a same-host/profile
+              # fallback; Cargo still checks compiler, flags and dependency freshness.
               restore-keys: |
                  slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-${{ matrix.profile }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
+                 slim-macos15-intel-xcode16.4-development-v2-inc1-${{ matrix.profile }}-
 
          - name: Install pinned toolchains and dependencies
            id: development-toolchains
@@ -586,6 +593,8 @@ jobs:
                  slim-macos15-intel-xcode16.4-compiler-v1-front${{ matrix.threads }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v2-inc1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
                  slim-macos15-intel-xcode16.4-development-v1-dev-${{ hashFiles('Cargo.lock', 'Cargo.toml', '.cargo/**', 'rust-toolchain.toml') }}-
+                 slim-macos15-intel-xcode16.4-compiler-v2-inc1-front${{ matrix.threads }}-
+                 slim-macos15-intel-xcode16.4-development-v2-inc1-dev-
 
          - name: Install toolchains and record exact versions
            id: compiler-toolchains
