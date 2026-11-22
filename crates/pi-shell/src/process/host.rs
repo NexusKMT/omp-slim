@@ -104,8 +104,8 @@ impl NativeHost {
 	/// before any worker threads exist: the process umask is read by setting
 	/// and restoring it, and the drive loop's [`Parker`](crate::sys::Parker)
 	/// waits for the exits of externals itself (Linux). Embedded in another
-	/// runtime (`omp zsh`), the process has threads of its own: the spawner
-	/// reads the umask without changing it, a waiter thread per external
+	/// runtime (`omp bash`/`omp sh`), the process has threads of its own: the
+	/// spawner reads the umask without changing it, a waiter thread per external
 	/// observes its exit (as [`crate::host::PiHost`] does inside Bun), and
 	/// the terminals' modes are put back when the host is dropped.
 	pub fn new(

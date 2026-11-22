@@ -1,14 +1,13 @@
-//! Self-test of the pty harness (`tests/pty_support`): its screen model,
-//! the real zsh driven interactively, and obash invoked as `zsh` against
-//! `/bin/zsh` on the same terminal sessions.
+//! Self-test of the pty harness (`tests/pty_support`): its screen model and
+//! the real zsh driven interactively.
 
 #![cfg(unix)]
 
 mod pty_support;
 
-use std::{io, time::Duration};
+use std::io;
 
-use pty_support::{Screen, Spawn, TIMEOUT, differential, have_real_zsh};
+use pty_support::{Screen, Spawn, TIMEOUT, have_real_zsh};
 
 #[test]
 fn the_screen_model_prints_wraps_and_erases() {
@@ -53,71 +52,5 @@ fn drives_the_real_zsh_interactively() -> io::Result<()> {
 	zsh.wait_screen_contains("size=30:100", TIMEOUT)?;
 	zsh.write("exit 3\r")?;
 	assert_eq!(zsh.wait(TIMEOUT)?.code(), Some(3));
-	Ok(())
-}
-
-/// The same `-c` session on obash-as-zsh and the real zsh: a terminal on
-/// stdin, its size, a line read in canonical mode (echoed by the tty)
-/// leave the same screen.
-#[test]
-fn obash_as_zsh_and_zsh_leave_the_same_screen() -> io::Result<()> {
-	if !have_real_zsh() {
-		return Ok(());
-	}
-	let script = "if [ -t 0 ]; then print tty; fi; stty size; read line; print -r -- \"got:$line\"";
-	let run = |pty: &mut pty_support::Pty| -> io::Result<()> {
-		pty.read_until("24 80", TIMEOUT)?;
-		pty.write("abc\r")?;
-		pty.read_until("got:abc", TIMEOUT)?;
-		assert_eq!(pty.wait(TIMEOUT)?.code(), Some(0));
-		Ok(())
-	};
-	let (obash, zsh) = differential(
-		Spawn::zsh().args(["-f", "-c", script]),
-		Spawn::real_zsh().args(["-f", "-c", script]),
-		run,
-	)?;
-	assert_eq!(obash, zsh);
-	assert_eq!(zsh, "tty\n24 80\nabc\ngot:abc");
-	Ok(())
-}
-
-/// A resize reaches the terminal both shells' children read.
-#[test]
-fn a_resize_is_seen_by_both() -> io::Result<()> {
-	if !have_real_zsh() {
-		return Ok(());
-	}
-	let script = "read x; stty size";
-	let (obash, zsh) = differential(
-		Spawn::zsh().args(["-f", "-c", script]),
-		Spawn::real_zsh().args(["-f", "-c", script]),
-		|pty| {
-			pty.settle(Duration::from_millis(200), TIMEOUT)?;
-			pty.resize(30, 100)?;
-			pty.write("\r")?;
-			pty.read_until("30 100", TIMEOUT)?;
-			pty.wait(TIMEOUT).map(drop)
-		},
-	)?;
-	assert_eq!(obash, zsh);
-	Ok(())
-}
-
-/// `^C` on the terminal ends `zsh -c 'sleep 100'` by `SIGINT`, the shell
-/// and the command alike (they share the foreground process group).
-#[test]
-fn ctrl_c_ends_a_foreground_command_like_zsh() -> io::Result<()> {
-	if !have_real_zsh() {
-		return Ok(());
-	}
-	let mut statuses = Vec::new();
-	for spawn in [Spawn::zsh(), Spawn::real_zsh()] {
-		let mut pty = spawn.args(["-f", "-c", "sleep 100"]).spawn()?;
-		std::thread::sleep(Duration::from_millis(300));
-		pty.write("\x03")?;
-		statuses.push(std::os::unix::process::ExitStatusExt::signal(&pty.wait(TIMEOUT)?));
-	}
-	assert_eq!(statuses, [Some(libc::SIGINT), Some(libc::SIGINT)]);
 	Ok(())
 }

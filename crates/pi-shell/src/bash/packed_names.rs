@@ -123,7 +123,6 @@ mod tests {
 		ir::Opcode,
 		signal::Signal,
 		store::{MiscKey, OptId, Table},
-		zshopt::ZshOpt,
 	};
 
 	/// Variant `i` in declaration order is named `VARIANTS[i]` (no
@@ -156,7 +155,6 @@ mod tests {
 
 	#[test]
 	fn packed_names_follow_declaration_order() {
-		by_iter::<ZshOpt>();
 		by_iter::<IntrinsicId>();
 		by_iter::<OptId>();
 		by_iter::<Signal>();
@@ -164,7 +162,6 @@ mod tests {
 		by_iter::<Table>();
 		by_iter::<Rlimit>();
 		by_iter::<DiagCode>();
-		by_parse::<ZshOpt>();
 		by_parse::<IntrinsicId>();
 		by_parse::<OptId>();
 		by_parse::<Signal>();
@@ -176,7 +173,7 @@ mod tests {
 
 	#[test]
 	fn display_pads_like_str() {
-		assert_eq!(format!("{:>8}", ZshOpt::Xtrace), "  xtrace");
+		assert_eq!(format!("{:>8}", OptId::Xtrace), "  xtrace");
 		assert_eq!(format!("{:<6}|", Signal::Int), "INT   |");
 	}
 }

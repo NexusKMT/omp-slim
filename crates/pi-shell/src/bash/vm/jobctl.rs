@@ -38,12 +38,11 @@ use super::{
 use crate::bash::{
 	fd::{FdOrigin, FdRef},
 	host::{ExtProc, OsHandle, PgroupSpec, ProcEvent},
-	ids::{Dialect, JobId, Platform, Vpid},
+	ids::{JobId, Platform, Vpid},
 	ir::{Opcode, Unit},
 	signal::{SigSet, Signal},
-	store::{KeyBuf, OptId, TrapKey},
-	term::{SetWhen, TermFlag, Termios},
-	zshopt::ZshOpt,
+	store::OptId,
+	term::{SetWhen, Termios},
 };
 
 /// The action text handed to [`crate::bash::Host::set_signal_trap`] for a
@@ -108,7 +107,7 @@ pub struct JobCtl {
 	/// zsh `stopmsg`: `exit` warned about jobs; counts down per command.
 	stopmsg:     u8,
 	/// The terminal `read -k`/`-q` put in cbreak mode, with the modes it
-	/// had ([`set_cbreak`]).
+	/// had.
 	cbreak:      Option<(FdRef, Termios)>,
 }
 
@@ -258,28 +257,17 @@ fn write_all(fd: &FdRef, mut bytes: &[u8]) {
 /// `WINCH` and `ALRM` for its whole life and ignores `QUIT` and `TERM`, and
 /// `TSTP`/`TTIN`/`TTOU` while it does job control; its externals start
 /// with the default dispositions.
-pub fn init_io(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc) {
+pub fn init_io(k: &mut Kernel, cx: &mut Cx<'_>, vp: &Vproc) {
 	k.jobctl.interactive = true;
 	k.jobctl.root = Some(vp.vpid);
 	k.jobctl.fg = Some(vp.vpid);
 	// zsh `init_signals`: an interactive zsh starts every signal at its
 	// default, so what was ignored on entry is not passed on to its
 	// commands (except `QUIT`, which it records as ignored).
-	if vp.mode.dialect() == Dialect::Zsh {
-		for sig in cx.host.ignored_signals().iter() {
-			if sig != Signal::Quit {
-				k.root
-					.set_record(cx.store, KeyBuf::Trap(TrapKey::Signal(sig)), None);
-			}
-		}
-	}
 	open_shtty(k, cx);
 	let monitor = state::option(&mut k.root, cx.store, vp, OptId::Monitor).unwrap_or(false);
-	if monitor
-		&& !acquire(k, cx)
-		&& let Err(err) = state::set_zsh_option(&mut k.root, cx.store, vp, ZshOpt::Monitor, false)
-	{
-		k.fail(err);
+	if monitor {
+		let _ = acquire(k, cx);
 	}
 	for sig in [Signal::Int, Signal::Winch, Signal::Alrm] {
 		let _ = cx.host.set_signal_trap(sig, Some(BStr::new(CATCH)));
@@ -374,30 +362,6 @@ fn acquire(k: &mut Kernel, cx: &mut Cx<'_>) -> bool {
 		let _ = term.set_foreground(h, mine);
 	}
 	k.jobctl.pgrp = Some(Pgrp { mine, orig });
-	true
-}
-
-/// zsh `dosetopt` turning `MONITOR` on from a builtin (`set -m`, `setopt
-/// monitor`, `options[monitor]=on`): with a terminal the shell takes it
-/// over (`acquire_pgrp`) and starts ignoring the terminal stop signals;
-/// without one the option cannot change (`can't change option`).
-pub fn enable_monitor(k: &mut Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> bool {
-	open_shtty(k, cx);
-	if k.jobctl.handle.is_none() {
-		return false;
-	}
-	if vp.parent.is_some() {
-		return true;
-	}
-	if k.jobctl.root.is_none() {
-		k.jobctl.root = Some(vp.vpid);
-		k.jobctl.fg = Some(vp.vpid);
-	}
-	if k.jobctl.pgrp.is_none() && acquire(k, cx) {
-		for sig in [Signal::Tstp, Signal::Ttin, Signal::Ttou] {
-			let _ = cx.host.set_signal_trap(sig, Some(BStr::new(b"")));
-		}
-	}
 	true
 }
 
@@ -887,7 +851,7 @@ pub fn suspend(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, sig: Signal) -> 
 	if sig == Signal::Tstp && !construct {
 		line.push(b'\n');
 	}
-	let how = JobLine { thisfmt: true, pid: long_list(k, cx, vp), ..JobLine::default() };
+	let how = JobLine { thisfmt: true, pid: false, ..JobLine::default() };
 	if let Some(text) = format_job(vp, number, how, platform) {
 		line.extend_from_slice(&text);
 	}
@@ -896,17 +860,9 @@ pub fn suspend(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, sig: Signal) -> 
 	Flow::Call
 }
 
-/// A job stopped: it becomes the current job and the old current one the
-/// previous (zsh `update_job`: `prevjob = curjob; curjob = job`; bash
-/// `set_current_job`).
+/// A job stopped: it becomes the current job (bash `set_current_job`).
 pub fn stopped_current(vp: &mut Vproc, number: u32) {
-	if vp.mode.dialect() == Dialect::Zsh {
-		// Even when it already was current: zsh then has it as both.
-		vp.jobs.previous = vp.jobs.current;
-		vp.jobs.current = Some(number);
-	} else {
-		vp.jobs.set_current(number);
-	}
+	vp.jobs.set_current(number);
 }
 
 /// The terminal goes back to the shell (zsh `attachtty(mypgrp)`). A job
@@ -995,7 +951,7 @@ pub fn fg_done(
 		return;
 	}
 	take_group(k, vp.vpid);
-	reclaim(k, cx, None, super::zle::active(vp));
+	reclaim(k, cx, None, false);
 	match killed {
 		Some(Signal::Int) => notice(k, vp, b"\n"),
 		Some(Signal::Pipe) | None => {},
@@ -1031,7 +987,7 @@ pub fn job_done(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, vpid: Vpid) {
 		return;
 	};
 	if k.jobctl.fg == Some(vpid) {
-		reclaim(k, cx, None, super::zle::active(vp));
+		reclaim(k, cx, None, false);
 		let killed = match vp.jobs.get(number).map(|j| j.state) {
 			Some(JobState::Done(status)) => death_signal(status, platform),
 			_ => None,
@@ -1043,7 +999,7 @@ pub fn job_done(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, vpid: Vpid) {
 			Some(Signal::Int) => notice(k, vp, b"\n"),
 			Some(Signal::Pipe) | None => {},
 			Some(_) => {
-				let how = JobLine { thisfmt: true, pid: long_list(k, cx, vp), ..JobLine::default() };
+				let how = JobLine { thisfmt: true, pid: false, ..JobLine::default() };
 				if let Some(line) = format_job(vp, number, how, platform) {
 					notice(k, vp, &line);
 				}
@@ -1059,21 +1015,9 @@ pub fn job_done(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, vpid: Vpid) {
 /// [`report`] at any time under `notify` (zsh `update_job` from the
 /// `SIGCHLD` handler): while the line editor waits for a key the notice
 /// goes above the line it redraws.
-fn report_async(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, number: u32, platform: Platform) {
-	let how = JobLine { pid: long_list(k, cx, vp), ..JobLine::default() };
-	if let Some(line) = format_job(vp, number, how, platform)
-		&& super::zle::display::print_above(k, cx, vp, &line)
-	{
-		settle_report(vp, number);
-		return;
-	}
+fn report_async(k: &Kernel, _cx: &mut Cx<'_>, vp: &mut Vproc, number: u32, platform: Platform) {
+	let how = JobLine { pid: false, ..JobLine::default() };
 	report(k, vp, number, platform, how);
-}
-
-/// zsh `LONG_LIST_JOBS`: job notices show the pid (`printjob`'s `lng`).
-fn long_list(k: &mut Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> bool {
-	vp.mode.dialect() == Dialect::Zsh
-		&& state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Longlistjobs).unwrap_or(false)
 }
 
 /// Print job `number`'s changed state (zsh `printjob` from `scanjobs` or
@@ -1098,42 +1042,9 @@ fn settle_report(vp: &mut Vproc, number: u32) {
 	}
 }
 
-/// zsh `deletejob` after a report: the current job falls back to the
-/// previous one (`curjob = prevjob; prevjob = job`, then `setprevjob`);
-/// bash `cleanup_dead_jobs`.
+/// bash `cleanup_dead_jobs`: drop job `number` from the table.
 fn forget(vp: &mut Vproc, number: u32) {
-	if vp.mode.dialect() != Dialect::Zsh {
-		vp.jobs.remove(number);
-		return;
-	}
-	let Some(i) = vp.jobs.list.iter().position(|j| j.number == number) else {
-		return;
-	};
-	vp.jobs.list.remove(i);
-	if vp.jobs.current == Some(number) {
-		vp.jobs.current = vp.jobs.previous;
-		vp.jobs.previous = None;
-	}
-	if vp.jobs.previous == Some(number) || vp.jobs.previous.is_none() {
-		vp.jobs.previous = zsh_prevjob(vp);
-	}
-}
-
-/// zsh `setprevjob`: the newest stopped job other than the current one,
-/// else the newest other job.
-pub fn zsh_prevjob(vp: &Vproc) -> Option<u32> {
-	let current = vp.jobs.current;
-	let mut other = None;
-	for j in vp.jobs.list.iter().rev() {
-		if Some(j.number) == current || j.inherited {
-			continue;
-		}
-		if matches!(j.state, JobState::Stopped(_)) {
-			return Some(j.number);
-		}
-		other = other.or(Some(j.number));
-	}
-	other
+	vp.jobs.remove(number);
 }
 
 /// Before each prompt (zsh `preprompt` → `scanjobs` when `notify` is off;
@@ -1152,7 +1063,7 @@ pub fn notices_before_prompt(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc) {
 		.filter(|j| !j.notified && !j.inherited && j.state != JobState::Running)
 		.map(|j| j.number)
 		.collect();
-	let how = JobLine { pid: long_list(k, cx, vp), ..JobLine::default() };
+	let how = JobLine { pid: false, ..JobLine::default() };
 	for number in changed {
 		report(k, vp, number, platform, how);
 	}
@@ -1208,21 +1119,9 @@ fn print_settled(k: &mut Kernel, i: usize) {
 	}
 }
 
-/// The lowest fd ≥ `from` a `{var}` redirection or a module opens: in a zsh
-/// with its terminal open, fd 10 is the terminal's (zsh `movefd` puts
-/// `SHTTY` there), so the first one handed out is 11.
-pub fn lowest_free_fd(k: &Kernel, vp: &Vproc, from: i32) -> i32 {
-	let fd = vp.fds.lowest_free(from);
-	if fd == 10 && k.jobctl.shtty.is_some() && vp.mode.dialect() == Dialect::Zsh {
-		vp.fds.lowest_free(11)
-	} else {
-		fd
-	}
-}
-
-/// The number of jobs in `vp`'s table (prompt `%j`, `\j`).
-pub fn job_count(vp: &Vproc) -> usize {
-	vp.jobs.iter().filter(|j| !j.inherited).count()
+/// The lowest fd ≥ `from` a `{var}` redirection or a module opens.
+pub fn lowest_free_fd(_k: &Kernel, vp: &Vproc, from: i32) -> i32 {
+	vp.fds.lowest_free(from)
 }
 
 /// zsh `zexit`'s check before an interactive shell leaves (`exit`,
@@ -1236,15 +1135,8 @@ pub fn check_before_exit(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc) -> boo
 		return false;
 	}
 	notices_before_prompt(k, cx, vp);
-	let zsh = vp.mode.dialect() == Dialect::Zsh;
-	let (check, running) = if zsh {
-		(
-			state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Checkjobs).unwrap_or(false),
-			state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Checkrunningjobs).unwrap_or(false),
-		)
-	} else {
-		(true, state::option(&mut k.root, cx.store, vp, OptId::Checkjobs).unwrap_or(false))
-	};
+	let (check, running) =
+		(true, state::option(&mut k.root, cx.store, vp, OptId::Checkjobs).unwrap_or(false));
 	if !check {
 		return false;
 	}
@@ -1259,53 +1151,15 @@ pub fn check_before_exit(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc) -> boo
 	let Some(stopped) = found.map(|j| matches!(j.state, JobState::Stopped(_))) else {
 		return false;
 	};
-	let msg: &[u8] = match (zsh, stopped) {
-		(true, true) => b"zsh: you have suspended jobs.\n",
-		(true, false) => b"zsh: you have running jobs.\n",
-		(false, true) => b"There are stopped jobs.\n",
-		(false, false) => b"There are running jobs.\n",
+	let msg: &[u8] = if stopped {
+		b"There are stopped jobs.\n"
+	} else {
+		b"There are running jobs.\n"
 	};
 	vp.out
 		.push_back(PendingWrite { fd: 2, bytes: BString::from(msg), off: 0 });
 	k.jobctl.stopmsg = 2;
 	true
-}
-
-/// zsh `bin_suspend` in a shell doing job control: stop ignoring the
-/// terminal stop signals, give the terminal back to the group the shell
-/// came from (`release_pgrp`), stop with `SIGTSTP` to that group, and when
-/// continued take the terminal over again (`acquire_pgrp`). `false` without
-/// job control (the caller stops the shell as a plain process).
-pub fn suspend_shell(k: &mut Kernel, cx: &mut Cx<'_>) -> bool {
-	let Some(pgrp) = k.jobctl.pgrp else {
-		return false;
-	};
-	let stops = [Signal::Ttin, Signal::Tstp, Signal::Ttou];
-	for sig in stops {
-		let _ = cx.host.set_signal_trap(sig, None);
-	}
-	if pgrp.orig != pgrp.mine
-		&& pgrp.orig > 0
-		&& let Some(h) = k.jobctl.handle
-		&& let Some(term) = cx.host.terminal()
-	{
-		let _ = term.set_foreground(h, pgrp.orig);
-		let _ = term.set_process_group(0, pgrp.orig);
-	}
-	let _ = cx.host.signal_process(-pgrp.orig, Some(Signal::Tstp));
-	k.jobctl.pgrp = None;
-	if acquire(k, cx) {
-		for sig in stops {
-			let _ = cx.host.set_signal_trap(sig, Some(BStr::new(b"")));
-		}
-	}
-	true
-}
-
-/// `jobs` listed the jobs: an `exit` right after leaves without the
-/// warning (zsh `bin_fg`: `stopmsg = 2`).
-pub const fn jobs_listed(k: &mut Kernel) {
-	k.jobctl.stopmsg = 2;
 }
 
 /// The interactive root read a command: an earlier `exit` warning wears
@@ -1320,63 +1174,16 @@ pub fn shtty_file(k: &Kernel) -> Option<FdRef> {
 	k.jobctl.shtty.clone()
 }
 
-/// The shell's terminal modes (zsh `shttyinfo`): what the line editor
-/// starts from and puts back, and what a stopped job's leave is replaced
-/// with.
-pub const fn shell_modes(k: &Kernel) -> Option<&Termios> {
-	k.jobctl.modes.as_ref()
-}
-
-/// Replace the shell's terminal modes (zsh `gettyinfo(&shttyinfo)` by the
-/// line editor).
-pub fn set_shell_modes(k: &mut Kernel, modes: Termios) {
-	k.jobctl.modes = Some(modes);
-}
-
-/// The terminal `read -k`/`-q` reads keys from (zsh `bin_read`): a `zpty`
-/// command's own terminal in its session, else `SHTTY`, opened now when
-/// the shell has none yet (zsh opens `/dev/tty`). `None`: no terminal.
-pub fn key_terminal(k: &mut Kernel, cx: &mut Cx<'_>, vp: &Vproc) -> Option<FdRef> {
-	if let Some(ctty) = session_terminal(vp) {
-		return Some(ctty);
-	}
-	open_shtty(k, cx);
+/// The shell's terminal when already open (what a
+/// [`super::proc::Probe::Input`] of [`super::proc::Probe::TERMINAL_FD`]
+/// reads).
+pub fn open_key_terminal(k: &Kernel, _vp: &Vproc) -> Option<FdRef> {
 	shtty_file(k)
 }
 
-/// [`key_terminal`] when already open (what a [`super::proc::Probe::Input`]
-/// of [`super::proc::Probe::TERMINAL_FD`] reads).
-pub fn open_key_terminal(k: &Kernel, vp: &Vproc) -> Option<FdRef> {
-	session_terminal(vp).or_else(|| shtty_file(k))
-}
-
-/// A `zpty` command's terminal ([`super::proc::VprocZsh::ctty`]).
-fn session_terminal(vp: &Vproc) -> Option<FdRef> {
-	vp.zsh.as_deref().and_then(|z| z.ctty.0.clone())
-}
-
-/// zsh `setcbreak` on `tty` for `read -k`/`-q`: no line editing, a read
-/// returns each key (echo stays). The terminal's modes before it are kept
-/// for [`end_cbreak`].
-pub fn set_cbreak(k: &mut Kernel, cx: &mut Cx<'_>, tty: &FdRef) {
-	let (Some(h), Some(term)) = (tty.os_handle(), cx.host.terminal()) else {
-		return;
-	};
-	let Ok(cur) = term.attrs(h) else {
-		return;
-	};
-	let mut ti = cur.clone();
-	ti.set(TermFlag::Icanon, false);
-	ti.min = 1;
-	ti.time = 0;
-	k.jobctl.cbreak = Some((tty.clone(), cur));
-	let _ = term.set_attrs(h, &ti, SetWhen::Drain);
-}
-
-/// After [`set_cbreak`]: its terminal back to the modes it had (zsh
-/// `settyinfo`), the shell's own or a `zpty` command's. Also when the
-/// read is abandoned ([`interrupt`]): the terminal does not stay in
-/// cbreak mode.
+/// Give the cbreak terminal back the modes it had (zsh `settyinfo`), the
+/// shell's own or a `zpty` command's. Also when the read is abandoned
+/// ([`interrupt`]): the terminal does not stay in cbreak mode.
 pub fn end_cbreak(k: &mut Kernel, cx: &mut Cx<'_>) {
 	if let Some((tty, modes)) = k.jobctl.cbreak.take()
 		&& let (Some(h), Some(term)) = (tty.os_handle(), cx.host.terminal())
@@ -1456,8 +1263,7 @@ impl Shell {
 						if sig == Signal::Tstp {
 							line.push(b'\n');
 						}
-						let pid = long_list(&mut self.k, cx, &self.procs[owner]);
-						let how = JobLine { thisfmt: true, pid, ..JobLine::default() };
+						let how = JobLine { thisfmt: true, pid: false, ..JobLine::default() };
 						if let Some(text) = format_job(&self.procs[owner], number, how, platform) {
 							line.extend_from_slice(&text);
 						}
@@ -1473,7 +1279,7 @@ impl Shell {
 					)
 					.unwrap_or(false)
 					{
-						report_async(&mut self.k, cx, &mut self.procs[owner], number, platform);
+						report_async(&self.k, cx, &mut self.procs[owner], number, platform);
 					}
 					// The `fg` waiting for it returns; a `wait` for it ends (a stop
 					// ends a wait with job control).
@@ -1534,36 +1340,9 @@ impl Shell {
 		let Some(pgrp) = self.k.jobctl.pgrp else {
 			return;
 		};
-		let Some(i) = self.procs.iter().position(|p| p.parent.is_none()) else {
+		let Some(_) = self.procs.iter().position(|p| p.parent.is_none()) else {
 			return;
 		};
-		let zsh = self.procs[i].mode.dialect() == Dialect::Zsh;
-		let hup = zsh
-			&& state::zsh_option(&mut self.k.root, cx.store, &self.procs[i], ZshOpt::Hup)
-				.unwrap_or(false)
-			&& jobbing(&mut self.k, cx);
-		if hup {
-			let targets: Vec<u32> = self.procs[i]
-				.jobs
-				.iter()
-				.filter(|j| !j.inherited && !j.nohup && j.state == JobState::Running)
-				.filter_map(|j| group(&self.k, j.vpid))
-				.collect();
-			let mut killed = 0;
-			for pgid in targets {
-				if let Ok(pgid) = i32::try_from(pgid)
-					&& pgid != pgrp.mine
-					&& cx.host.signal_process(-pgid, Some(Signal::Hup)).is_ok()
-				{
-					killed += 1;
-				}
-			}
-			if killed > 0 {
-				// The shell is leaving: written now, not queued.
-				let line = format!("zsh: warning: {killed} jobs SIGHUPed\n");
-				write_all(&self.procs[i].fds.handle(2), line.as_bytes());
-			}
-		}
 		if pgrp.orig != pgrp.mine
 			&& pgrp.orig > 0
 			&& let Some(h) = self.k.jobctl.handle

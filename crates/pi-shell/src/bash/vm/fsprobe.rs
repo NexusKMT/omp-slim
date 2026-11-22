@@ -117,20 +117,6 @@ impl FsErr {
 		let text = BString::from(diag::strerror(err).as_bytes());
 		Self { errno: errno_of(err, &text), text }
 	}
-
-	/// The error as an [`io::Error`] (for `zsh_errmsg`).
-	pub fn io(&self) -> io::Error {
-		#[cfg(unix)]
-		if self.errno != 0 {
-			return io::Error::from_raw_os_error(self.errno);
-		}
-		io::Error::other(self.text.to_string())
-	}
-
-	/// Whether this is `errno` `code`.
-	pub const fn is(&self, code: i32) -> bool {
-		self.errno == code
-	}
 }
 
 /// The C `errno` of `err` (0: unknown).

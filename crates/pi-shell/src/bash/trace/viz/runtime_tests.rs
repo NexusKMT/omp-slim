@@ -702,14 +702,13 @@ fn nesting_is_a_syntax_error_past_the_limit_and_fits_a_default_stack_at_it() {
 			Features, JsonDialect, MAX_NESTING, Offsets, PrintStyle, parse_all, print_list, to_json,
 		},
 	};
-	let zsh = Features::ZSH | Features::ZSH_SHORT_LOOPS | Features::ZSH_INTERACTIVE_COMMENTS;
 	// (prefix, open, inner, close, suffix, features, levels per repeat,
 	// levels of the prefix): `open`/`close` repeat once per level; a bash
 	// substitution is two; text re-parsed as a list (a backquote, a `$((`
 	// that is not arithmetic) is one more.
 	type Shape =
 		(&'static str, &'static str, &'static str, &'static str, &'static str, Features, u32, u32);
-	let shapes: [Shape; 13] = [
+	let shapes: [Shape; 10] = [
 		("", "( ", ":", " )", "", Features::NONE, 1, 0),
 		("", "{ ", ":", "; }", "", Features::NONE, 1, 0),
 		("", "if :; then ", ":", "; fi", "", Features::NONE, 1, 0),
@@ -720,9 +719,6 @@ fn nesting_is_a_syntax_error_past_the_limit_and_fits_a_default_stack_at_it() {
 		("[[ ", "a || ", "a", "", " ]]", Features::NONE, 1, 0),
 		("echo `", "( ", ":", " )", "`", Features::NONE, 1, 1),
 		("echo $(", "( ", "echo x", " )", " )", Features::NONE, 1, 1),
-		("", "( ", ":", " )", "", zsh, 1, 0),
-		("", "echo $(", "echo x", ")", "", zsh, 1, 0),
-		("[[ ", "( ", "a", " )", " ]]", zsh, 1, 0),
 	];
 	let check = move || {
 		for (pre, open, inner, close, suf, feat, cost, extra) in shapes {
@@ -735,33 +731,19 @@ fn nesting_is_a_syntax_error_past_the_limit_and_fits_a_default_stack_at_it() {
 			for dialect in [JsonDialect::Native, JsonDialect::Shfmt] {
 				to_json(at.as_bytes(), &prog, dialect, Offsets::Bytes);
 			}
-			let style = if feat.contains(Features::ZSH) {
-				PrintStyle::Zsh
-			} else {
-				PrintStyle::DeclareF
-			};
+			let style = PrintStyle::DeclareF;
 			for cc in &prog.commands {
 				print_list(cc.list(), style);
 			}
-			let mode = if feat.contains(Features::ZSH) {
-				ModeId::Zsh
-			} else {
-				ModeId::Bash
-			};
-			ir::compile_all(at.as_bytes(), mode, feat);
-			if !feat.contains(Features::ZSH) {
-				let (trace, _) = run_native_shell(&at);
-				present(&trace, &Options::default());
-			}
+			ir::compile_all(at.as_bytes(), ModeId::Bash, feat);
+			let (trace, _) = run_native_shell(&at);
+			present(&trace, &Options::default());
 			let past = parse_all(src(n + 1).as_bytes(), feat)
 				.map(|_| ())
 				.expect_err(&format!("{pre}{open} {feat:?} nested {} deep parsed", n + 1));
-			// zsh's lexer reports a substitution it cannot parse as `parse
-			// error near …`, whatever the reason.
 			let msg = past.bash_msg();
 			assert!(
-				msg.ends_with(b"maximum nesting level exceeded")
-					|| (feat.contains(Features::ZSH) && open == "echo $("),
+				msg.ends_with(b"maximum nesting level exceeded"),
 				"{pre}{open:?} nested {} deep: {}",
 				n + 1,
 				String::from_utf8_lossy(&msg)

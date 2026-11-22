@@ -38,8 +38,6 @@ hashbrown.workspace = true
 jiff = { workspace = true, features = ["tzdb-bundle-platform"] }
 libm.workspace = true
 parking_lot.workspace = true
-# zsh/pcre (`pcre_compile`, `pcre_match`, `-pcre-match`).
-pcre2-sys.workspace = true
 pi-builtins.workspace = true
 pi-vcs.workspace = true
 pi-vfs.workspace = true

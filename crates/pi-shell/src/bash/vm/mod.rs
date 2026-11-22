@@ -30,8 +30,6 @@ pub mod quote;
 mod redir;
 mod state;
 mod xtrace;
-mod zle;
-mod zsh;
 
 use std::{
 	collections::{HashMap, HashSet, VecDeque},
@@ -42,8 +40,6 @@ use std::{
 use bstr::{BStr, BString};
 use serde::{Deserialize, Serialize};
 
-/// zsh/newuser's startup check, for the process shell's startup files.
-pub use self::builtins::zsh_mod_newuser::startup_scripts as newuser_startup_scripts;
 pub use self::{
 	api::ShellApi,
 	arith::Cache as ArithCache,
@@ -52,11 +48,10 @@ pub use self::{
 	pattern::Cache as PatternCache,
 	proc::{Run, Vproc, vproc_layout},
 	text::TextKind,
-	zsh::zpattern::Cache as ZshPatternCache,
 };
 use self::{
 	control::{CANCEL, Ctl, PAUSE, RESUME, SIGNAL, SUSPEND},
-	proc::{Frame, FrameKind, Live, PendingWrite, ScriptKind},
+	proc::{Frame, Live, PendingWrite},
 	state::{Overlay, Root, Var},
 };
 use crate::bash::{
@@ -123,9 +118,7 @@ pub struct Cx<'a> {
 /// Initial state of a new shell.
 #[derive(Clone, Debug)]
 pub struct ShellInit {
-	/// Starting mode. A zsh-dialect shell starts with that emulation's
-	/// options, and takes [`Self::options`] as zsh option names (`no`
-	/// prefix allowed).
+	/// Starting mode.
 	pub mode:        ModeId,
 	/// `$0`; also the prefix of diagnostics.
 	pub argv0:       BString,
@@ -147,26 +140,17 @@ pub struct ShellInit {
 	/// [`crate::bash::invocation::ShellArgs::startup_files`] names and the
 	/// host found (`BASH_ENV`, a login shell's profiles).
 	pub startup:     Vec<(BString, BString)>,
-	/// Unexported parameters a zsh shell sets from its command line before
-	/// its startup files: `ZSH_EXECUTION_STRING` (the `-c` string) and
-	/// `ZSH_SCRIPT` (the script file).
-	pub zsh_params:  Vec<(BString, BString)>,
-	/// The system zsh's function directories, which a zsh shell's `fpath`
-	/// starts with when the environment sets no `FPATH` (zsh's compiled-in
-	/// `FPATH_DIR` and its subdirectories). `None`: zsh 5.9's default
-	/// layout.
-	pub zsh_fpath:   Option<Vec<BString>>,
 	/// Whose shell it is: a user's, or a program's ([`Profile::Tool`]).
 	pub profile:     Profile,
 }
 
 /// Whose shell a [`Shell`] is, which decides whether it may touch its
 /// user's interactive state. Recorded at [`Shell::create`]
-/// ([`MiscKey::Profile`]); nested shells (`bash -c`, `zsh -i`) inherit it.
+/// ([`MiscKey::Profile`]); nested shells (`bash -c`, `bash -i`) inherit it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Profile {
-	/// A user's own shell (`omp zsh`, obash): history, the line editor and
-	/// the completion system work as in bash and zsh.
+	/// A user's own shell (`omp bash`, `omp sh`, obash): history, the line
+	/// editor and the completion system work as in bash.
 	#[default]
 	User,
 	/// A shell a program drives (an agent's `bash` tool, an embedder's
@@ -206,8 +190,6 @@ impl Default for ShellInit {
 			options:     Vec::new(),
 			shell_pid:   0,
 			startup:     Vec::new(),
-			zsh_params:  Vec::new(),
-			zsh_fpath:   None,
 			profile:     Profile::User,
 		}
 	}
@@ -463,12 +445,6 @@ pub struct Kernel {
 	pub pseudo_traps:       exec::PseudoTraps,
 	/// Re-parsed `${ ;}` bodies ([`exec::NoforkUnits`]); not imaged.
 	pub nofork_units:       exec::NoforkUnits,
-	/// The functions each zsh word code digest (`.zwc`) holds, by path,
-	/// with the modification time and size they were read at
-	/// ([`Kernel::dump_funcs`]): an `$fpath` search asks of the same digests
-	/// for every function it resolves. Per shell, as its host's files are
-	/// (shells sharing an engine may see other files at a path); not imaged.
-	zsh_dumps:              parking_lot::Mutex<HashMap<BString, DumpFuncs>>,
 	/// Syntax-tree buffers of the last command run, lent to the next parse
 	/// ([`Parser::recycle`](crate::bash::syntax::Parser::recycle); at most
 	/// [`SPARE_BUFFER_BYTES`], see [`Kernel::keep_spare_tree`]); not imaged.
@@ -476,8 +452,6 @@ pub struct Kernel {
 	/// The arithmetic this shell evaluated last ([`arith::Recent`]); not
 	/// imaged.
 	pub arith_recent:       arith::Recent,
-	/// [`arith_recent`](Self::arith_recent) for zsh's evaluator.
-	pub zsh_arith_recent:   zsh::math::Recent,
 	/// The last event clock reading while it is still current
 	/// ([`Kernel::stamp`]): set by a reading that ends a duration or starts a
 	/// command, cleared by [`Kernel::clock_stale`] before anything that can
@@ -521,10 +495,6 @@ pub struct Kernel {
 	/// ended though the job runs on. Dropped when the job ends; not imaged
 	/// (a restored shell signals the job's vproc).
 	pub pid_owners:         Vec<(u32, Vpid, Vpid)>,
-	/// The math options ([`zsh::arith::math_options`]) last read for a vproc
-	/// without an overlay, with the [`state::Root::opts_gen`] and mode they
-	/// were read under: every `(( ))` asks.
-	pub math_opts:          Option<(u64, ModeId, zsh::math::Options)>,
 	/// Background jobs' lone commands whose redirections wait for their name
 	/// to resolve ([`proc::Deferral`]): imaged (a restored command goes on).
 	pub deferrals:          Vec<proc::Deferral>,
@@ -552,39 +522,7 @@ impl ProcState {
 	}
 }
 
-/// A digest's function names, with the modification time (ns) and size
-/// of the file they were read from.
-type DumpFuncs = ((i64, u64), Arc<std::collections::HashSet<BString>>);
-
 impl Kernel {
-	/// The functions (metafied names) of the digest `path` as this shell
-	/// last read it, while its modification time and size are `stamp`.
-	pub(crate) fn dump_funcs(
-		&self,
-		path: &[u8],
-		stamp: (i64, u64),
-	) -> Option<Arc<std::collections::HashSet<BString>>> {
-		self
-			.zsh_dumps
-			.lock()
-			.get(path)
-			.filter(|(s, _)| *s == stamp)
-			.map(|(_, f)| Arc::clone(f))
-	}
-
-	/// Remember the functions `funcs` of the digest `path` at `stamp`.
-	pub(crate) fn cache_dump_funcs(
-		&self,
-		path: &[u8],
-		stamp: (i64, u64),
-		funcs: Arc<std::collections::HashSet<BString>>,
-	) {
-		self
-			.zsh_dumps
-			.lock()
-			.insert(BString::from(path), (stamp, funcs));
-	}
-
 	fn new(engine: &Arc<Engine>, root: Root, argv0: BString, shell_pid: u32) -> Self {
 		let ctl = Ctl::new();
 		Self {
@@ -618,10 +556,8 @@ impl Kernel {
 			startup: Vec::new(),
 			pseudo_traps: exec::PseudoTraps::default(),
 			nofork_units: HashMap::new(),
-			zsh_dumps: parking_lot::Mutex::new(HashMap::new()),
 			spare_tree: crate::bash::syntax::Tree::default(),
 			arith_recent: arith::Recent::default(),
-			zsh_arith_recent: zsh::math::Recent::default(),
 			clock: None,
 			null_input: None,
 			callout_labels: Vec::new(),
@@ -631,7 +567,6 @@ impl Kernel {
 			bangs: Vec::new(),
 			settled: Vec::new(),
 			pid_owners: Vec::new(),
-			math_opts: None,
 			deferrals: Vec::new(),
 			jobctl: jobctl::JobCtl::default(),
 		}
@@ -989,7 +924,6 @@ impl Kernel {
 
 	/// Queue a diagnostic on the vproc's stderr and emit a `Diag` event.
 	pub fn diag(&mut self, cx: &mut Cx<'_>, vp: &mut Vproc, line: u32, diag: Diag) {
-		zle::display::trash_for_message(self, cx, vp);
 		let bytes = self.render_diag(cx, vp, line, &diag);
 		vp.out
 			.push_back(PendingWrite { fd: 2, bytes: bytes.into(), off: 0 });
@@ -1007,19 +941,6 @@ impl Kernel {
 	/// spawned process prints for a redirection it applies itself
 	/// ([`crate::bash::ChildRedir`]).
 	pub fn render_quiet(&mut self, cx: &mut Cx<'_>, vp: &Vproc, line: u32, diag: &Diag) -> Vec<u8> {
-		if vp.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-			let (mut prefix, mut zline) = self.zsh_site(cx, vp, line);
-			if self.zsh_shinstdin(cx, vp) {
-				prefix.clear();
-				zline = 0;
-			}
-			let utf8 = zsh::params::mb_in(self, cx.store, vp).unwrap_or(false);
-			return crate::bash::diag::render_zsh(diag, crate::bash::diag::ZshSite {
-				prefix: &prefix,
-				line: zline,
-				utf8,
-			});
-		}
 		static COMMAND: Origin = Origin::Command;
 		let origin = vp
 			.runs
@@ -1050,135 +971,19 @@ impl Kernel {
 		}
 	}
 
-	/// zsh's `scriptname` and `lineno` for a diagnostic of `vp` at script
-	/// line `line` (zsh `zwarning`): the innermost function's name with the
-	/// line counted from its definition, `(eval)` with the line in the
-	/// eval'd text, a sourced file's name, the script's path, or `zsh` for a
-	/// `-c` string or standard input.
-	fn zsh_site(&self, cx: &mut Cx<'_>, vp: &Vproc, line: u32) -> (BString, u32) {
-		let (name, base) = self.zsh_site_base(cx.store, vp);
-		(name, line.saturating_sub(base))
-	}
-
-	/// zsh `zwarning`'s `isset(SHINSTDIN) && !locallevel`: commands read
-	/// from standard input, outside functions (`locallevel`) and sourced
-	/// files (`source` turns `shinstdin` off), report without a script name
-	/// or line ([`crate::bash::diag::ZshSite`] with an empty prefix). A subshell
-	/// decides by the site it inherited.
-	fn zsh_shinstdin(&mut self, cx: &mut Cx<'_>, vp: &Vproc) -> bool {
-		let mut top = false;
-		for f in &vp.frames {
-			match f.kind {
-				FrameKind::Function { .. } | FrameKind::Script { what: ScriptKind::Source, .. } => {
-					return false;
-				},
-				FrameKind::Script { what: ScriptKind::Run, .. } => top = true,
-				_ => {},
-			}
-		}
-		let inherited = vp.zsh.as_ref().and_then(|z| z.site.as_ref());
-		if !top && inherited.is_none_or(|(name, _)| name.as_slice() != b"zsh") {
-			return false;
-		}
-		let opt = crate::bash::zshopt::ZshOpt::Shinstdin;
-		state::zsh_option(&mut self.root, cx.store, vp, opt).unwrap_or(false)
-	}
-
-	/// [`Self::zsh_site`] of `vp` as the script name and the script line
-	/// its lines count from (`u32::MAX`: a function without a definition
-	/// line, which prints no line); a subshell without a site of its own
-	/// takes the one its parent had when it started ([`proc::VprocZsh::site`]).
-	pub(super) fn zsh_site_base(&self, store: &mut dyn StateStore, vp: &Vproc) -> (BString, u32) {
-		// Code a builtin runs (`ScriptKind::Code`) keeps the line numbers
-		// it was parsed with: its caller's name, no function offset.
-		let mut code = false;
-		// A function whose body is a lone command without braces names the
-		// site; its lines are the caller's, counted from the caller's base.
-		let mut named: Option<BString> = None;
-		let site = |named: Option<BString>, name: BString, base: u32| (named.unwrap_or(name), base);
-		for (i, f) in vp.frames.iter().enumerate().rev() {
-			match &f.kind {
-				FrameKind::Script { what: ScriptKind::Code(_), .. } => code = true,
-				FrameKind::Function { name, .. } if i > 0 && !code && exec::keeps_caller_line(f) => {
-					named.get_or_insert_with(|| name.clone());
-				},
-				// zsh numbers a function's lines from its definition's (0,
-				// which prints no line).
-				FrameKind::Function { name, .. } => {
-					let start = if code {
-						0
-					} else {
-						f.unit
-							.as_ref()
-							.map_or(u32::MAX, |u| callstack::definition_line(u))
-					};
-					return site(named, name.clone(), start);
-				},
-				// The text of a command substitution run in a child vproc:
-				// zsh reports it under its parent's name.
-				FrameKind::Script { what: ScriptKind::Eval, .. } if i == 0 && vp.parent.is_some() => {},
-				FrameKind::Script { what: ScriptKind::Eval, .. } => {
-					return site(named, BString::from("(eval)"), 0);
-				},
-				FrameKind::Script { what: ScriptKind::Source, .. } => {
-					let file = vp.calls.iter().rev().find_map(|c| match &c.kind {
-						callstack::CallKind::Source { file, .. } => Some(file.clone()),
-						_ => None,
-					});
-					return site(named, file.unwrap_or_else(|| BString::from("zsh")), 0);
-				},
-				FrameKind::Script { what: ScriptKind::Run, .. } => {
-					let link = vp.runs.front().and_then(|r| r.chain.links.first());
-					let name = if let Some(l) = link {
-						if let Origin::File(path) = &l.origin {
-							path.clone()
-						} else {
-							BString::from("zsh")
-						}
-					} else {
-						let argv0 =
-							state::dollar0(store, vp, &self.argv0).unwrap_or_else(|_| self.argv0.clone());
-						let base = argv0.rsplit(|&c| c == b'/').next().unwrap_or_default();
-						BString::from(base)
-					};
-					return site(named, name, 0);
-				},
-				_ => {},
-			}
-		}
-		match vp.zsh.as_ref().and_then(|z| z.site.as_ref()) {
-			Some((name, base)) => site(named, name.clone(), *base),
-			None => site(named, BString::from("zsh"), 0),
-		}
-	}
-
 	/// Record a store failure; the next scheduler turn abandons every script.
 	pub fn fail(&mut self, err: StoreError) {
 		self.root.fail(err);
 	}
 }
 
-/// The level an imported `SHLVL` gives (before the shell adds one): bash
-/// takes a whole number or 0, zsh (`zstrtol`, never evaluated) the leading
-/// number. Called at shell startup and for nested shells.
-fn imported_shlvl(value: &[u8], zsh: bool) -> i32 {
-	if !zsh {
-		return std::str::from_utf8(value)
-			.ok()
-			.and_then(|v| v.parse().ok())
-			.unwrap_or(0);
-	}
-	let v = value.trim_ascii_start();
-	let (neg, digits) = match v.split_first() {
-		Some((b'-', rest)) => (true, rest),
-		Some((b'+', rest)) => (false, rest),
-		_ => (false, v),
-	};
-	let n = digits
-		.iter()
-		.take_while(|c| c.is_ascii_digit())
-		.fold(0i32, |n, &c| n.wrapping_mul(10).wrapping_add(i32::from(c - b'0')));
-	if neg { n.wrapping_neg() } else { n }
+/// The level an imported `SHLVL` gives (before the shell adds one): a
+/// whole number or 0. Called at shell startup and for nested shells.
+fn imported_shlvl(value: &[u8]) -> i32 {
+	std::str::from_utf8(value)
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(0)
 }
 
 /// Whether `name` is a shell identifier.
@@ -1208,200 +1013,20 @@ fn startup_vars(k: &mut Kernel, cx: &mut Cx<'_>, init: &ShellInit) -> Result<(),
 	let ppid = cx.host.ppid();
 	let need_shell = state::global(cx.store, b"SHELL")?.is_none();
 	let deferred_shell = need_shell
-		&& init.mode.dialect() != crate::bash::ids::Dialect::Zsh
 		&& match cx.host.login_shell_initializer() {
 			Some(initializer) => cx.store.defer_scalar(b"SHELL", Attrs::NONE, initializer)?,
 			None => false,
 		};
-	let values = if init.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		zsh_startup_values(cx, k.engine.config().platform)
-	} else {
-		startup_values(cx, &init.argv0, ppid, StartupVars {
-			lookup_shell: need_shell && !deferred_shell,
-			interactive:  init.interactive,
-		})
-	};
-	// zsh started as sh or ksh has no `MANPATH` and no prompt aliases
-	// (`special_params_sh`).
-	let started_sh =
-		matches!(init.mode, crate::bash::ids::ModeId::ZshSh | crate::bash::ids::ModeId::Ksh);
-	if started_sh {
-		k.root.set_misc(cx.store, MiscKey::ZshStartedSh, "1");
-	}
+	let values = startup_values(cx, &init.argv0, ppid, StartupVars {
+		lookup_shell: need_shell && !deferred_shell,
+		interactive:  init.interactive,
+	});
 	for (name, var, forced) in values {
-		if started_sh && name == b"MANPATH" {
-			continue;
-		}
 		if forced || state::global(cx.store, name)?.is_none() {
 			k.root.set_var(cx.store, name, Some(var));
 		}
 	}
-	// zsh's other prompt names share the variable of `PS1`, … (`RPS1`
-	// and `RPS2` start unset, and so do their other names).
-	if init.mode.dialect() == crate::bash::ids::Dialect::Zsh && !started_sh {
-		for group in crate::bash::vm::zsh::specials::PROMPT_GROUPS {
-			let value = match state::global(cx.store, group[0])? {
-				Some(Var { value: VarValue::Str(s), .. }) => s.clone(),
-				Some(_) => BString::default(),
-				None => continue,
-			};
-			for &name in &group[1..] {
-				if state::global(cx.store, name)?.is_none() {
-					k.root
-						.set_var(cx.store, name, Some(Var::scalar(value.clone(), Attrs::NONE)));
-				}
-			}
-		}
-	}
-	if init.mode.dialect() == crate::bash::ids::Dialect::Zsh
-		&& let Some(dirs) = &init.zsh_fpath
-		&& !init.env.iter().any(|(n, _)| n == "FPATH")
-	{
-		let joined = bstr::join(b":", dirs);
-		k.root
-			.set_var(cx.store, b"FPATH", Some(Var::scalar(BString::from(joined), Attrs::NONE)));
-	}
-	for (name, value) in &init.zsh_params {
-		k.root
-			.set_var(cx.store, name, Some(Var::scalar(value.clone(), Attrs::NONE)));
-	}
 	Ok(())
-}
-
-/// The plain variables zsh 5.9 sets at startup (`init.c` `setupvals`,
-/// `params.c` defaults), as `(name, value, forced)` like
-/// [`startup_values`]; zsh's special parameters (`PPID`, `USERNAME`,
-/// `ZSH_VERSION`, …) are computed by the zsh dialect, not stored.
-pub fn zsh_startup_values(
-	cx: &mut Cx<'_>,
-	platform: crate::bash::ids::Platform,
-) -> Vec<(&'static [u8], Var, bool)> {
-	let user = cx.host.user();
-	let defaults: [(&'static [u8], &[u8]); 20] = [
-		(b"IFS", b" \t\n\0"),
-		(b"PS1", b"%m%# "),
-		(b"PS2", b"%_> "),
-		(b"PS3", b"?# "),
-		(b"PS4", b"+%N:%i> "),
-		(b"SPROMPT", b"zsh: correct '%R' to '%r' [nyae]? "),
-		(b"WORDCHARS", b"*?_-.[]~=/&;!#$%^(){}<>"),
-		(b"TMPPREFIX", b"/tmp/zsh"),
-		(b"TIMEFMT", b"%J  %U user %S system %P cpu %*E total"),
-		(b"OPTIND", b"1"),
-		(b"PATH", b"/bin:/usr/bin:/usr/ucb:/usr/local/bin"),
-		(b"NULLCMD", b"cat"),
-		(b"READNULLCMD", b"more"),
-		// The scalar sides of the special ties start set (empty): `$+cdpath`
-		// is 1 until `unset CDPATH` (`params.c` `IPDEF8`). `fpath` and
-		// `module_path` start with the system zsh's compiled-in directories
-		// (`init.c` `setupvals`: `FPATH_DIR`, `MODULE_DIR`).
-		(b"FPATH", b"/usr/local/share/zsh/site-functions:/usr/share/zsh/site-functions:/usr/share/zsh/5.9/functions"),
-		(b"CDPATH", b""),
-		(b"MANPATH", b""),
-		(b"MODULE_PATH", b"/usr/lib/zsh/5.9"),
-		(b"MAILPATH", b""),
-		(b"PSVAR", b""),
-		(b"FIGNORE", b""),
-	];
-	// `MODULE_PATH` is never imported (`PM_DONTIMPORT`).
-	let mut out: Vec<(&'static [u8], Var, bool)> = defaults
-		.into_iter()
-		.map(|(name, value)| {
-			(name, Var::scalar(BString::from(value), Attrs::NONE), name == b"MODULE_PATH")
-		})
-		.collect();
-	// `setiparam`: integers.
-	let integers: [(&'static [u8], &[u8]); 3] =
-		[(b"MAILCHECK", b"60"), (b"KEYTIMEOUT", b"40"), (b"LISTMAX", b"100")];
-	for (name, value) in integers {
-		out.push((name, Var::scalar(value, Attrs::INTEGER), false));
-	}
-	// zsh exports `HOME` and `LOGNAME` (`addenv` when not imported).
-	if !user.home.is_empty() {
-		out.push((&b"HOME"[..], Var::scalar(user.home.clone(), Attrs::EXPORT), false));
-	}
-	out.push((&b"LOGNAME"[..], Var::scalar(user.name, Attrs::EXPORT), false));
-	let (_, release, machine) = cx.host.uname().unwrap_or_default();
-	// The host's build only shapes these when the engine emulates that host
-	// (`cfg!(target_os = "macos")` is the host's, not the engine's, OS).
-	let macos = platform == crate::bash::ids::Platform::MacOs && cfg!(target_os = "macos");
-	// The configure-time `MACHTYPE`, `VENDOR` and `OSTYPE` of the system's
-	// zsh (Apple's build reports `x86_64` on every Mac).
-	let machtype = if macos {
-		BString::from("x86_64")
-	} else {
-		BString::from(std::env::consts::ARCH)
-	};
-	let vendor = if macos {
-		"apple"
-	} else if std::env::consts::ARCH == "x86_64" {
-		"pc"
-	} else {
-		"unknown"
-	};
-	let ostype = if macos {
-		let mut o = BString::from("darwin");
-		if let Some(major) = release
-			.split(|&c| c == b'.')
-			.next()
-			.filter(|m| !m.is_empty())
-		{
-			o.extend_from_slice(major);
-			o.extend_from_slice(b".0");
-		}
-		o
-	} else {
-		BString::from("linux-gnu")
-	};
-	let tty = cx
-		.host
-		.terminal()
-		.and_then(|t| t.open_controlling().ok().flatten())
-		.map_or_default(|s| s.name);
-	// `HOST` is set before the environment is imported, the others after.
-	let cputype = if !machine.is_empty() {
-		machine
-	} else if macos && std::env::consts::ARCH == "aarch64" {
-		BString::from("arm64")
-	} else {
-		BString::from(std::env::consts::ARCH)
-	};
-	let fixed: [(&'static [u8], BString, bool); 6] = [
-		(b"HOST", cx.host.hostname(), false),
-		(b"CPUTYPE", cputype, true),
-		(b"MACHTYPE", machtype, true),
-		(b"OSTYPE", ostype, true),
-		(b"TTY", tty, true),
-		(b"VENDOR", BString::from(vendor), true),
-	];
-	for (name, value, forced) in fixed {
-		out.push((name, Var::scalar(value, Attrs::NONE), forced));
-	}
-	// `signals`: `EXIT`, the signal names by number, `ZERR`, `DEBUG`.
-	let mut signals = vec![BString::from("EXIT")];
-	for n in 1..=31u8 {
-		match crate::bash::signal::Signal::from_number(n, platform) {
-			Some(s) => signals.push(BString::from(s.to_string())),
-			None => signals.push(BString::from(format!("SIG{n}"))),
-		}
-	}
-	signals.push(BString::from("ZERR"));
-	signals.push(BString::from("DEBUG"));
-	out.push((
-		&b"signals"[..],
-		Var {
-			attrs: Attrs::NONE,
-			value: VarValue::Indexed(
-				signals
-					.into_iter()
-					.enumerate()
-					.map(|(i, s)| (i64::try_from(i).unwrap_or(0), s))
-					.collect(),
-			),
-		},
-		true,
-	));
-	out
 }
 
 /// Startup-only defaults shared by root and nested bash/sh shells.
@@ -1554,10 +1179,9 @@ impl Shell {
 		}
 		k.root
 			.set_var(cx.store, b"PWD", Some(Var::scalar(cwd.clone(), Attrs::EXPORT)));
-		let zsh = init.mode.dialect() == crate::bash::ids::Dialect::Zsh;
 		let shlvl = state::global(cx.store, b"SHLVL")?
 			.and_then(|v| v.as_scalar())
-			.map_or(0, |v| imported_shlvl(v, zsh));
+			.map_or(0, imported_shlvl);
 		k.root
 			.set_var(cx.store, b"SHLVL", Some(Var::scalar((shlvl + 1).to_string(), Attrs::EXPORT)));
 		startup_vars(&mut k, cx, &init)?;
@@ -1568,16 +1192,7 @@ impl Shell {
 			.env
 			.iter()
 			.any(|(n, _)| matches!(n.as_slice(), b"POSIXLY_CORRECT" | b"POSIX_PEDANTIC"));
-		// A zsh-dialect shell's options are zsh's, applied once its root vproc
-		// exists (below).
-		let mut zsh_options = Vec::new();
 		for (name, on) in &init.options {
-			if zsh {
-				let (opt, inverted) = crate::bash::zshopt::ZshOpt::lookup(name)
-					.ok_or_else(|| ShellError::UnknownOption { name: name.clone() })?;
-				zsh_options.push((opt, *on != inverted));
-				continue;
-			}
 			let opt = OptId::from_name(name)
 				.ok_or_else(|| ShellError::UnknownOption { name: name.clone() })?;
 			k.root.set_option(cx.store, opt, *on);
@@ -1611,17 +1226,6 @@ impl Shell {
 			// zsh `init_signals`: of the signals ignored on entry only `QUIT`
 			// is recorded as ignored (`ZSIG_IGNORED`), and any of them may be
 			// trapped.
-			if zsh {
-				cx.host.forget_ignored(sig);
-				if sig != crate::bash::Signal::Quit {
-					continue;
-				}
-				k.root.set_record(
-					cx.store,
-					KeyBuf::Misc(MiscKey::ZshEntryIgnored),
-					Some(Record::Words(vec![BString::from(sig.to_string())])),
-				);
-			}
 			k.root.set_record(
 				cx.store,
 				KeyBuf::Trap(crate::bash::store::TrapKey::Signal(sig)),
@@ -1640,41 +1244,10 @@ impl Shell {
 		}
 		let mut root = Vproc::new(vpid, None, fds, cwd, None, false);
 		root.mode = init.mode;
-		if zsh {
-			let start = mode::ZshStart {
-				mode:        init.mode,
-				options:     &zsh_options,
-				interactive: init.interactive,
-				login:       init.argv0.first() == Some(&b'-'),
-				stdin:       false,
-			};
-			mode::init_zsh_options(&mut k.root, cx.store, &mut root, &start)
-				.map_err(ShellError::Store)?;
-			// zsh `createaliastable`: every zsh starts with these two
-			// aliases, `-f` and any emulation included.
-			for (name, text) in [("run-help", "man"), ("which-command", "whence")] {
-				k.root.set_record(
-					cx.store,
-					KeyBuf::Alias(name.into()),
-					Some(Record::Alias(text.into())),
-				);
-			}
-			if let Some(err) = k.root.take_fault() {
-				return Err(ShellError::Store(err));
-			}
-		}
 		if init.interactive {
-			jobctl::init_io(&mut k, cx, &mut root);
+			jobctl::init_io(&mut k, cx, &root);
 			if let Some(err) = k.root.take_fault() {
 				return Err(ShellError::Store(err));
-			}
-			// zsh `init_io`: an interactive shell with its terminal uses
-			// the line editor, unless the command line turned it off.
-			let zle = crate::bash::zshopt::ZshOpt::Zle;
-			let off = zsh_options.iter().any(|&(o, on)| o == zle && !on);
-			if zsh && !off && jobctl::shtty_file(&k).is_some() {
-				state::set_zsh_option(&mut k.root, cx.store, &mut root, zle, true)
-					.map_err(ShellError::Store)?;
 			}
 		}
 		Ok(Self {
@@ -2061,8 +1634,7 @@ impl Shell {
 				continue;
 			}
 			if p.jobs.subshell
-				|| (p.mode.dialect() != crate::bash::ids::Dialect::Zsh
-					&& !state::option(&mut self.k.root, cx.store, p, OptId::Monitor).unwrap_or(false))
+				|| !state::option(&mut self.k.root, cx.store, p, OptId::Monitor).unwrap_or(false)
 			{
 				return;
 			}
@@ -2080,10 +1652,7 @@ impl Shell {
 				(None, proc::JobState::Stopped(_)) => {
 					job.state = proc::JobState::Running;
 					job.notified = false;
-					// zsh leaves the current job alone (`update_job`).
-					if p.mode.dialect() != crate::bash::ids::Dialect::Zsh {
-						p.jobs.reset_current();
-					}
+					p.jobs.reset_current();
 				},
 				(None, proc::JobState::Running) => {},
 			}
@@ -2407,11 +1976,6 @@ impl Shell {
 					continue;
 				}
 			}
-			// The line editor of the interactive shell: `SIGINT` abandons the
-			// line being read, `SIGWINCH` makes it redisplay.
-			if self.procs[i].parent.is_none() && zle::signal(&mut self.procs[i], sig, trap.is_some()) {
-				continue;
-			}
 			if let Some(ignored) = trap {
 				if !ignored {
 					let process = &mut self.procs[i];
@@ -2632,18 +2196,10 @@ pub fn imported_function(k: &Kernel, name: &[u8], value: &[u8]) -> Option<Record
 /// `Exec` for externals `p` ran itself; `background`: the child was one of
 /// `p`'s background jobs. zsh (`update_job`) runs the trap (a `trap` action
 /// or the `TRAPCHLD` function) only for those, not for the foreground job.
-pub fn owe_chld(k: &mut Kernel, cx: &mut Cx<'_>, p: &mut Vproc, background: bool) {
-	let zsh = p.mode.dialect() == crate::bash::ids::Dialect::Zsh;
-	if zsh && !background {
-		return;
-	}
+pub fn owe_chld(k: &mut Kernel, cx: &mut Cx<'_>, p: &mut Vproc, _background: bool) {
 	let key = crate::bash::store::Key::Trap(crate::bash::store::TrapKey::Signal(Signal::Chld));
 	let trapped = match state::record(cx.store, p, key) {
 		Ok(Some(Record::Trap { action, .. })) => !action.is_empty(),
-		Ok(None) if zsh => matches!(
-			state::record(cx.store, p, crate::bash::store::Key::Func(bstr::BStr::new(b"TRAPCHLD"))),
-			Ok(Some(Record::Func { .. }))
-		),
 		Ok(_) => false,
 		Err(err) => {
 			k.fail(err);
@@ -2783,8 +2339,6 @@ impl Vproc {
 			own_traps: proc::OwnTraps::EMPTY,
 			trap_frames: 0,
 			mode: ModeId::Bash,
-			zsh: None,
-			zle: None,
 		}
 	}
 
@@ -2877,36 +2431,9 @@ impl Vproc {
 		vp.lineage = self.lineage;
 		jobctl::inherit(k, vp.vpid, self.vpid);
 		vp.mode = self.mode;
-		vp.zle.clone_from(&self.zle);
-		vp.set_sticky(self.sticky().cloned());
-		// zsh forks keep `scriptname`: diagnostics of the child name the
-		// parent's function, `(eval)` or file.
-		if self.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-			let site = k.zsh_site_base(store, self);
-			let z = vp.zsh.get_or_insert_with(Box::default);
-			z.site = Some(site);
-			z.context = zsh::specials::eval_context(self);
-			if let Some(parent) = self.zsh.as_deref() {
-				z.ptys.clone_from(&parent.ptys);
-				z.curses.clone_from(&parent.curses);
-				z.last_math = parent.last_math;
-			}
-		}
-		// The session's terminal (a `zpty` slave) whatever the mode.
-		if let Some(tty) = self.zsh.as_deref().and_then(|z| z.ctty.0.clone()) {
-			vp.zsh.get_or_insert_with(Box::default).ctty = proc::Ctty(Some(tty));
-		}
 		// bash `without_job_control`: no jobs, no job control (a command
 		// substitution turns it back on when it starts).
 		vp.jobs.subshell = true;
-		// zsh `clearjobtab`: a fork of a shell doing job control keeps a
-		// copy of its job table to report (`jobs`, `$jobstates`).
-		if self.mode.dialect() == crate::bash::ids::Dialect::Zsh
-			&& !self.jobs.is_empty()
-			&& state::option(&mut k.root, store, self, OptId::Monitor).unwrap_or(false)
-		{
-			vp.jobs = exec::inherited_jobs(self, true);
-		}
 		vp.calls = callstack::inherited(self);
 		vp.trace_base = xtrace::level(self) - 1;
 		// Started from a context where `set -e` is ignored (the parent's op

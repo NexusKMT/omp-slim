@@ -233,8 +233,6 @@ impl MemStore {
 			Key::Var(_) => matches!(record, Record::Var(_)),
 			Key::Local { .. } => matches!(record, Record::Var(_) | Record::Unset),
 			Key::Scope(_) => matches!(record, Record::Scope { .. }),
-			// The env options live in `Table::Opt` only (`ZshOpt::env_twin`).
-			Key::ZshOpt(opt) => matches!(record, Record::Opt(_)) && opt.env_twin().is_none(),
 			Key::ZshAlias { .. } => matches!(record, Record::Alias(_)),
 			_ => !matches!(record, Record::Var(_) | Record::Unset | Record::Scope { .. }),
 		};

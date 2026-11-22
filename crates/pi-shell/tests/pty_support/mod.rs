@@ -1,5 +1,5 @@
-//! Drive a shell on a pseudo-terminal (Unix): obash under any name (`zsh`,
-//! `bash`, `sh`) or a real shell (`/bin/zsh`) for differential runs.
+//! Drive a shell on a pseudo-terminal (Unix): obash under any name (`bash`,
+//! `sh`) or the real zsh (`/bin/zsh`).
 //!
 //! [`Spawn`] describes the process: program, `argv[0]`, arguments, a
 //! hermetic environment (`PATH` of the runner, `HOME` and `ZDOTDIR` a fresh
@@ -64,8 +64,8 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 /// The real zsh for differential runs.
 pub const REAL_ZSH: &str = "/bin/zsh";
 
-/// The script [`Spawn::zle_sync`] writes into the home directory; a
-/// zsh-like shell (obash as `zsh`, the real zsh) sources it
+/// The script [`Spawn::zle_sync`] writes into the home directory; the
+/// real zsh sources it
 /// (`. ~/.zle-sync`) to answer [`Pty::zle_sync`]. It opens a FIFO and
 /// installs a `zle -F` handler on it that answers each request (a line
 /// `N`) with `ESC ] 9999;zle-sync N BEL`, an OSC string terminals (and
@@ -138,16 +138,10 @@ impl Spawn {
 		}
 	}
 
-	/// obash invoked as `name` (`zsh`, `bash`, `sh`).
+	/// obash invoked as `name` (`bash`, `sh`).
 	#[must_use]
 	pub fn obash_as(name: &str) -> Self {
 		Self::new(obash()).argv0(name)
-	}
-
-	/// obash invoked as `zsh`.
-	#[must_use]
-	pub fn zsh() -> Self {
-		Self::obash_as("zsh")
 	}
 
 	/// The real zsh ([`REAL_ZSH`]), invoked as `zsh`.
@@ -696,28 +690,6 @@ impl Drop for Pty {
 			let _ = self.child.wait();
 		}
 	}
-}
-
-/// Run the same session against obash and the real zsh: `drive` gets each
-/// [`Pty`] in turn; the final screens, obash's first.
-///
-/// # Errors
-///
-/// The first failure of either run.
-pub fn differential(
-	obash: Spawn,
-	zsh: Spawn,
-	mut drive: impl FnMut(&mut Pty) -> io::Result<()>,
-) -> io::Result<(String, String)> {
-	let mut screens = Vec::with_capacity(2);
-	for spawn in [obash, zsh] {
-		let mut pty = spawn.spawn()?;
-		drive(&mut pty)?;
-		screens.push(pty.screen().contents());
-	}
-	let zsh = screens.pop().unwrap_or_default();
-	let obash = screens.pop().unwrap_or_default();
-	Ok((obash, zsh))
 }
 
 /// Bytes typed on terminal `tty` that no reader has taken yet.

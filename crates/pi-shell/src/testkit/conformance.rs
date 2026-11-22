@@ -9,9 +9,7 @@
 //! shell's state: every write is visible after the op that made it, a host
 //! write between two steps is seen by the next op, and a copy taken between
 //! any two top-level commands restores a fresh shell that continues exactly
-//! as the original does. The zsh cases pin the same for zsh
-//! options, the current mode, a zsh function's saved state and sticky
-//! emulation.
+//! as the original does.
 
 use std::sync::Arc;
 
@@ -23,10 +21,9 @@ use crate::{
 		Script, Shell, ShellApi, SigTarget, Signal, StateStore, Step, StoreError, UnitId, VarValue,
 		Vpid,
 		store::{
-			BlobSlot, Change, Elem, Job, JobState, Key, KeyBuf, LossyKind, MiscKey, OptId, Record,
-			Sticky, Table, TrapKey, Var, ZshScope,
+			BlobSlot, Change, Elem, Job, JobState, Key, KeyBuf, MiscKey, OptId, Record, Sticky, Table,
+			TrapKey, Var,
 		},
-		zshopt::{ZshOpt, ZshOpts},
 	},
 	testkit::{
 		fault::skeleton_init,
@@ -63,7 +60,6 @@ pub fn store_conformance<S: StateStore>(
 	fine_grained_changes_reject_the_wrong_shape(&mut make());
 	deleting_a_scope_drops_its_locals(&mut make());
 	scan_visits_each_table_alone(&mut make());
-	zsh_options_and_aliases_put_scan_del_and_follow_the_epoch(&mut make(), &mut bump_epoch);
 	blobs_are_independent(&mut make());
 	apply_never_moves_the_epoch(&mut make(), &mut bump_epoch);
 	copies_hold_the_same_records(&mut make(), &mut copy);
@@ -79,10 +75,6 @@ pub fn store_conformance<S: StateStore>(
 	a_copy_between_commands_restores_in_a_fresh_shell(&mut make, &mut copy);
 	a_trap_set_before_a_copy_runs_in_the_restored_shell(&mut make, &mut copy);
 	a_trap_runs_in_a_shell_restored_mid_command(&mut make, &mut copy);
-	emulate_and_setopt_are_visible_after_each_op(&mut make());
-	a_host_zsh_option_write_reaches_the_next_split(&mut make(), &mut bump_epoch);
-	a_zsh_function_scope_holds_the_callers_options(&mut make());
-	a_sticky_function_survives_a_copy_between_commands(&mut make, &mut copy);
 }
 
 /// One op per step: what "after each op" means in the shell cases.
@@ -116,40 +108,11 @@ fn scope_rec(func: Option<&str>) -> Record {
 	Record::Scope { func: func.map(BString::from), positional: None, zsh: None }
 }
 
-/// A sticky emulation naming options on and off.
-fn sticky_sample() -> Sticky {
-	Sticky {
-		mode: ModeId::ZshSh,
-		full: true,
-		on:   vec![ZshOpt::Ksharrays, ZshOpt::Shwordsplit],
-		off:  vec![ZshOpt::Nomatch],
-	}
+/// A sticky emulation.
+const fn sticky_sample() -> Sticky {
+	Sticky { mode: ModeId::Bash, full: true }
 }
 
-/// A zsh scope save with every field set, a saved trap and a slot that was
-/// unset.
-fn zsh_scope_sample() -> ZshScope {
-	let mut opts = ZshOpts::defaults(ModeId::Zsh);
-	opts.set(ZshOpt::Shwordsplit, true);
-	opts.set(ZshOpt::Errexit, true);
-	ZshScope {
-		mode: ModeId::Bash,
-		opts,
-		sticky: Some(sticky_sample()),
-		restore_sticky: true,
-		traps: vec![
-			(TrapKey::Exit, Some(Record::Trap { mode: ModeId::Zsh, action: bytes(b"echo \xffbye") })),
-			(TrapKey::Signal(Signal::Usr1), None),
-		],
-		lossy: LossyKind::SparseGaps.bit() | LossyKind::Shadowed.bit(),
-		pat_disables: vec![bytes(b"*")],
-		keep_underscore: true,
-		underscore: Some(bytes(b"last\xff")),
-		specials: vec![bytes(b"SECONDS")],
-	}
-}
-
-/// Owned bytes.
 fn bytes(b: &[u8]) -> BString {
 	BString::from(b)
 }
@@ -189,9 +152,8 @@ fn push_distinct<T: PartialEq>(seq: &mut Vec<T>, v: T) {
 /// One record in every table: non-UTF-8 names and values, a NUL-leading
 /// value, sparse indexed arrays with negative and huge indices, an assoc
 /// array in non-sorted order, root scopes (outermost first) with a
-/// variable and an `Unset` local; zsh options, global and suffix aliases of
-/// the same name, a sticky function, a scope's zsh save, attributes with
-/// every zsh flag and the widest width and base, the `zsh-sh` mode.
+/// variable and an `Unset` local; a sticky function, attributes with
+/// every flag and the widest width and base.
 fn samples() -> Vec<(KeyBuf, Record)> {
 	vec![
 		(KeyBuf::Var(bytes(b"\xff\xfename")), str_var(b"\xff\x00\xfe not utf-8", Attrs::EXPORT)),
@@ -247,21 +209,13 @@ fn samples() -> Vec<(KeyBuf, Record)> {
 			file:   bytes(b"main"),
 		}),
 		(KeyBuf::Func(bytes(b"sticky")), Record::Func {
-			mode:   ModeId::Zsh,
+			mode:   ModeId::Bash,
 			sticky: Some(Box::new(sticky_sample())),
-			source: bytes(b"sticky () {\n\tprint -l $x\n}").into(),
+			source: bytes(b"sticky () {\n\techo \"$x\"\n}").into(),
 			unit:   UnitId([8; 32]),
 			attrs:  Attrs::NONE,
-			file:   bytes(b"zsh\xff"),
+			file:   bytes(b"sh\xff"),
 		}),
-		(KeyBuf::ZshOpt(ZshOpt::Extendedglob), Record::Opt(true)),
-		(KeyBuf::ZshOpt(ZshOpt::Nomatch), Record::Opt(false)),
-		(
-			KeyBuf::ZshAlias { suffix: false, name: bytes(b"G\xff") },
-			Record::Alias(bytes(b"| grep \xfe")),
-		),
-		(KeyBuf::ZshAlias { suffix: true, name: bytes(b"G\xff") }, Record::Alias(bytes(b"vi"))),
-		(KeyBuf::Misc(MiscKey::Mode), Record::Misc(bytes(b"zsh-sh"))),
 		(KeyBuf::Alias(bytes(b"l\xffl")), Record::Alias(bytes(b"ls -l \xfe"))),
 		(KeyBuf::Opt(OptId::Errexit), Record::Opt(true)),
 		(KeyBuf::Opt(OptId::Nullglob), Record::Opt(false)),
@@ -317,7 +271,7 @@ fn samples() -> Vec<(KeyBuf, Record)> {
 		(KeyBuf::Scope(0), Record::Scope {
 			func:       Some(bytes(b"f\xff")),
 			positional: Some(vec![bytes(b"a"), bytes(b"")]),
-			zsh:        Some(Box::new(zsh_scope_sample())),
+			zsh:        None,
 		}),
 		(KeyBuf::Scope(1), Record::Scope { func: None, positional: None, zsh: None }),
 		// One parameter, the same again (`f "$@"`), none: stores may keep
@@ -331,7 +285,7 @@ fn samples() -> Vec<(KeyBuf, Record)> {
 		(KeyBuf::Scope(3), Record::Scope {
 			func:       Some(bytes(b"again")),
 			positional: Some(vec![bytes(b"\xffonly")]),
-			zsh:        Some(Box::new(zsh_scope_sample())),
+			zsh:        None,
 		}),
 		(KeyBuf::Scope(4), Record::Scope {
 			func:       Some(bytes(b"none")),
@@ -394,10 +348,6 @@ fn put_rejects_a_record_of_another_table(store: &mut dyn StateStore) {
 		(Key::Scope(0), str_var(b"x", Attrs::NONE)),
 		(Key::Misc(MiscKey::Cwd), scope_rec(Some("f"))),
 		(local(0, b"x"), str_var(b"no scope 0", Attrs::NONE)),
-		(Key::ZshOpt(ZshOpt::Extendedglob), Record::Alias(bytes(b"x"))),
-		// An env option lives in `Table::Opt` only (`ZshOpt::env_twin`).
-		(Key::ZshOpt(ZshOpt::Errexit), Record::Opt(true)),
-		(Key::ZshAlias { suffix: true, name: BStr::new("txt") }, Record::Opt(true)),
 	];
 	for (key, rec) in cases {
 		let what = format!("Put({key:?}, {rec:?})");
@@ -686,7 +636,7 @@ fn deleting_a_scope_drops_its_locals(store: &mut dyn StateStore) {
 }
 
 /// Every table, `Scope` and `Local` included.
-const TABLES: [Table; 14] = [
+const TABLES: [Table; 12] = [
 	Table::Var,
 	Table::Func,
 	Table::Alias,
@@ -699,8 +649,6 @@ const TABLES: [Table; 14] = [
 	Table::Misc,
 	Table::Scope,
 	Table::Local,
-	Table::ZshOpt,
-	Table::ZshAlias,
 ];
 
 /// A scan of each table visits exactly that table's records, once each.
@@ -725,62 +673,6 @@ fn scan_visits_each_table_alone(store: &mut dyn StateStore) {
 		assert!(!want.is_empty(), "the samples cover table {table}");
 		assert_eq!(seen, want, "a scan of {table} visits exactly its records");
 	}
-}
-
-/// zsh options put, read, scan and delete like any keyed record, and a
-/// write followed by an epoch bump is what the store reads next; a global
-/// and a suffix alias of the same name are separate records.
-fn zsh_options_and_aliases_put_scan_del_and_follow_the_epoch<S: StateStore>(
-	store: &mut S,
-	bump: &mut impl FnMut(&mut S),
-) {
-	let split = Key::ZshOpt(ZshOpt::Shwordsplit);
-	let ksh = Key::ZshOpt(ZshOpt::Ksharrays);
-	assert_eq!(read(store, split), None, "absent: the zsh default applies");
-	apply(store, Change::Put(split, Record::Opt(true)));
-	apply(store, Change::Put(ksh, Record::Opt(false)));
-	assert_eq!(read(store, split), Some(Record::Opt(true)), "a zsh option reads back");
-	let mut seen = Vec::new();
-	store
-		.scan(Table::ZshOpt, &mut |k, r| seen.push((k.to_buf(), r.clone())))
-		.expect("scan");
-	seen.sort_by(|x, y| x.0.cmp(&y.0));
-	assert_eq!(
-		seen,
-		[(ksh.to_buf(), Record::Opt(false)), (split.to_buf(), Record::Opt(true))],
-		"a scan of zsh options visits both"
-	);
-	let e0 = store.epoch();
-	apply(store, Change::Put(split, Record::Opt(false)));
-	assert_eq!(store.epoch(), e0, "an engine write leaves the epoch");
-	bump(&mut *store);
-	assert_ne!(store.epoch(), e0, "the embedder's bump moves it");
-	assert_eq!(read(store, split), Some(Record::Opt(false)), "after the bump the write is read");
-	apply(store, Change::Del(split));
-	assert_eq!(read(store, split), None, "a Del removes a zsh option");
-	bump(&mut *store);
-	assert_eq!(read(store, split), None, "and stays removed after a bump");
-	assert_eq!(read(store, ksh), Some(Record::Opt(false)), "the other option stays");
-
-	let global = Key::ZshAlias { suffix: false, name: BStr::new("pdf") };
-	let suffix = Key::ZshAlias { suffix: true, name: BStr::new("pdf") };
-	apply(store, Change::Put(global, Record::Alias(bytes(b"| less"))));
-	apply(store, Change::Put(suffix, Record::Alias(bytes(b"zathura"))));
-	assert_eq!(read(store, global), Some(Record::Alias(bytes(b"| less"))), "the global alias");
-	assert_eq!(read(store, suffix), Some(Record::Alias(bytes(b"zathura"))), "the suffix alias");
-	assert_eq!(read(store, Key::Alias(BStr::new("pdf"))), None, "neither is a regular alias");
-	apply(store, Change::Del(global));
-	bump(&mut *store);
-	assert_eq!(read(store, global), None, "deleting the global alias");
-	let mut left = Vec::new();
-	store
-		.scan(Table::ZshAlias, &mut |k, r| left.push((k.to_buf(), r.clone())))
-		.expect("scan");
-	assert_eq!(
-		left,
-		[(suffix.to_buf(), Record::Alias(bytes(b"zathura")))],
-		"leaves the suffix alias of the same name"
-	);
 }
 
 /// Blob slots are independent; blobs round-trip any bytes.
@@ -1433,155 +1325,6 @@ fn a_trap_runs_in_a_shell_restored_mid_command<S: StateStore>(
 	);
 	let original = signal_and_finish(&mut shell_a, &mut host_a, &mut store_a, id);
 	assert_eq!(original, restored, "the original shell runs it the same way");
-}
-
-/// `emulate zsh` writes the current mode (`zsh`) through, and each
-/// `setopt` writes its zsh option, after the op that made it; the mode
-/// persists across commands.
-fn emulate_and_setopt_are_visible_after_each_op<S: StateStore>(store: &mut S) {
-	let mut host = FakeHost::new();
-	let mut shell = create(&mut host, store);
-	let mode = Key::Misc(MiscKey::Mode);
-	let zsh = Some(Record::Misc(bytes(b"zsh")));
-	let modes = distinct_values(&mut shell, &mut host, store, "emulate zsh", mode);
-	assert_eq!(modes.last(), Some(&zsh), "the mode after emulate zsh: {modes:?}");
-	assert_ne!(modes.first(), Some(&zsh), "and not before it: {modes:?}");
-	let ext = Key::ZshOpt(ZshOpt::Extendedglob);
-	assert_ne!(read(store, ext), Some(Record::Opt(true)), "emulate zsh leaves extendedglob off");
-	let seen = distinct_values(
-		&mut shell,
-		&mut host,
-		store,
-		"setopt extendedglob; setopt noextendedglob; setopt EXTENDED_GLOB",
-		ext,
-	);
-	let mut on: Vec<bool> = seen
-		.iter()
-		.map(|r| matches!(r, Some(Record::Opt(true))))
-		.collect();
-	on.dedup();
-	assert_eq!(on, [false, true, false, true], "extendedglob after each setopt: {seen:?}");
-	assert_eq!(read(store, mode), zsh, "the switch persists");
-}
-
-/// A zsh option the host turns on between two steps of a zsh-mode loop
-/// (`shwordsplit`) changes the next expansion of `$x`.
-fn a_host_zsh_option_write_reaches_the_next_split<S: StateStore>(
-	store: &mut S,
-	bump: &mut impl FnMut(&mut S),
-) {
-	let mut host = FakeHost::new();
-	let mut shell = create(&mut host, store);
-	assert_eq!(run(&mut shell, &mut host, store, "emulate zsh"), 0);
-	let src =
-		"x='a b'; n=0; set -- $x; while [ $# = 1 ]; do n=$((n+1)); set -- $x; done; echo \"$# $n\"";
-	let run = shell.submit(Script::command(src.as_bytes()));
-	for _ in 0..200 {
-		let done = one_op(&mut shell, &mut host, store, run, &mut |_| {});
-		assert_eq!(done, None, "$x stays one word until the host sets shwordsplit");
-	}
-	let n0 = read_number(store, b"n");
-	assert!(n0 >= 3, "the loop ran before the host write ({n0} iterations)");
-	apply(store, Change::Put(Key::ZshOpt(ZshOpt::Shwordsplit), Record::Opt(true)));
-	bump(&mut *store);
-	let status = finish(&mut shell, &mut host, store, run, 200, "the loop after shwordsplit");
-	assert_eq!(status, 0);
-	let n = read_number(store, b"n");
-	assert!(n == n0 || n == n0 + 1, "the next expansion split $x: {n0} then {n}");
-	assert_eq!(host.stdout.bytes(), format!("2 {n}\n").as_bytes());
-}
-
-/// While a zsh function that sets `localoptions` runs (one op per step),
-/// `Scope(0)` is its scope and holds the zsh save with the caller's mode
-/// and options, while the option it set is written through; after the
-/// return the scope is gone and the option is back.
-fn a_zsh_function_scope_holds_the_callers_options<S: StateStore>(store: &mut S) {
-	let mut host = FakeHost::new();
-	let mut shell = create(&mut host, store);
-	assert_eq!(run(&mut shell, &mut host, store, "emulate zsh"), 0);
-	let split = Key::ZshOpt(ZshOpt::Shwordsplit);
-	type Seen = (Option<BString>, Option<(ModeId, bool)>, Option<Record>);
-	let mut inside: Vec<Seen> = Vec::new();
-	let status = each_op(
-		&mut shell,
-		&mut host,
-		store,
-		"f() { setopt localoptions shwordsplit; i=0; while [ $i -lt 5 ]; do i=$((i+1)); done; }; f; \
-		 echo $i",
-		&mut |s, _| {
-			if let Some(Record::Scope { func, zsh, .. }) = read(s, Key::Scope(0)) {
-				let saved = zsh.map(|z| (z.mode, z.opts.get(ZshOpt::Shwordsplit)));
-				push_distinct(&mut inside, (func, saved, read(s, split)));
-			}
-		},
-	);
-	assert_eq!(status, 0);
-	assert!(!inside.is_empty(), "f's scope was seen while it ran");
-	assert!(
-		inside
-			.iter()
-			.all(|(func, saved, _)| func.as_ref().is_some_and(|f| f == "f")
-				&& *saved == Some((ModeId::Zsh, false))),
-		"every step inside f shows its scope with the caller's mode and options: {inside:?}"
-	);
-	assert!(
-		inside
-			.iter()
-			.any(|(.., live)| *live == Some(Record::Opt(true))),
-		"setopt inside f is written through: {inside:?}"
-	);
-	assert_eq!(read(store, Key::Scope(0)), None, "the scope is gone after the return");
-	assert_ne!(read(store, split), Some(Record::Opt(true)), "localoptions restored shwordsplit");
-	assert_eq!(host.stdout.bytes(), b"5\n");
-}
-
-/// A function defined by `emulate zsh -c` from bash code is a zsh function
-/// with a plain zsh sticky emulation; a copy of the store between commands
-/// restores a fresh shell that still runs it with zsh semantics (`$x` one
-/// word) while its own bash code splits `$x`, as the original does.
-fn a_sticky_function_survives_a_copy_between_commands<S: StateStore>(
-	make: &mut impl FnMut() -> S,
-	copy: &mut impl FnMut(&S) -> S,
-) {
-	let mut host_a = FakeHost::new();
-	let mut store_a = make();
-	let mut shell_a = create(&mut host_a, &mut store_a);
-	let define = "emulate zsh -c 'g() { print -l $x; }'";
-	assert_eq!(run(&mut shell_a, &mut host_a, &mut store_a, define), 0);
-	match read(&mut store_a, Key::Func(BStr::new("g"))) {
-		Some(Record::Func { mode, sticky, .. }) => {
-			assert_eq!(mode, ModeId::Zsh, "g's body is zsh");
-			assert_eq!(
-				sticky,
-				Some(Box::new(Sticky { mode: ModeId::Zsh, full: false, on: vec![], off: vec![] })),
-				"g carries the emulation it was defined under"
-			);
-		},
-		other => panic!("g is a function record, got {other:?}"),
-	}
-	assert_ne!(
-		read(&mut store_a, Key::Misc(MiscKey::Mode)),
-		Some(Record::Misc(bytes(b"zsh"))),
-		"emulate -c does not keep the switch"
-	);
-	let mut store_b = copy(&store_a);
-	let mut host_b = FakeHost::new();
-	let engine = Engine::new(EngineConfig::default());
-	let (mut shell_b, report) = Shell::restore(
-		&engine,
-		&mut Cx { host: &mut host_b, store: &mut store_b },
-		RestoreOpts::default(),
-	)
-	.expect("restore");
-	assert!(report.lost.is_empty(), "nothing is lost, got {:?}", report.lost);
-	let src = "x='a b'; g; printf '%s\\n' $x";
-	let restored = run_settled(&mut shell_b, &mut host_b, &mut store_b, src);
-	assert_eq!(restored.stdout, "a b\na\nb\n", "g keeps zsh splitting, bash code splits");
-	drop(shell_b);
-	host_b.assert_released();
-	let original = run_settled(&mut shell_a, &mut host_a, &mut store_a, src);
-	assert_eq!(original, restored, "the original shell runs it the same way");
-	host_a.assert_no_leaks(&mut shell_a, &mut store_a);
 }
 
 #[cfg(test)]

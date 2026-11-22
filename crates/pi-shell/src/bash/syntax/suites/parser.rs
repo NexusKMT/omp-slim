@@ -132,16 +132,6 @@ fn former_p0_unsupported_constructs_now_parse() {
 }
 
 #[test]
-fn zsh_features_select_the_zsh_grammar() {
-	let prog = Parsed(parse_all(b"echo ${(f)x}", Features::ZSH).expect("zsh grammar"));
-	let CommandKind::Simple(s) = prog.cmd().kind() else {
-		panic!("a simple command");
-	};
-	assert!(dbg(word(s, 1).parts()).starts_with("Zsh("));
-	assert_eq!(word(s, 1).parts().len(), 1);
-}
-
-#[test]
 fn a_parse_error_ends_the_source() {
 	let src = b"echo a\necho b; fi\necho c\n";
 	let mut p = Parser::new(src, Features::NONE, &NoAliases);

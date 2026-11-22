@@ -23,13 +23,7 @@ use super::{
 	model::{HIST_FOREIGN, Hist, inblank},
 	words::lex_words,
 };
-use crate::bash::{
-	diag::Diag,
-	vm::zsh::{
-		modify::{chabspath, convamps},
-		text::{CaseMod, casemodify},
-	},
-};
+use crate::bash::diag::Diag;
 
 /// `histdone`: history was expanded on this line.
 pub const HISTFLAG_DONE: u8 = 1;
@@ -101,17 +95,6 @@ impl Lex {
 				.stack
 				.iter()
 				.any(|q| matches!(q, Quote::Single | Quote::Dollar | Quote::TickSingle))
-	}
-
-	/// Whether the lexer is between tokens with nothing open (no quote,
-	/// escape, here-document): a line read now begins a new command.
-	pub const fn idle(&self) -> bool {
-		self.stack.is_empty()
-			&& !self.esc
-			&& !self.comment
-			&& self.bodies.is_empty()
-			&& self.pending.is_empty()
-			&& self.heredoc.is_none()
 	}
 
 	/// Whether the next character would start a comment.
@@ -316,10 +299,7 @@ pub struct LineState {
 	pub defev:    i64,
 	/// `interactivecomments` when the event began.
 	pub comments: bool,
-	/// History expansion failed: the event is abandoned, [`hend`] is
-	/// still to run.
-	///
-	/// [`hend`]: super::zsh::hend
+	/// History expansion failed: the event is abandoned.
 	pub failed:   bool,
 	/// The lexer state.
 	pub lex:      Lex,
@@ -348,8 +328,6 @@ pub struct BangOpts {
 	/// bash's `history_expand` (`history -p`): `!#` on an empty line is
 	/// empty.
 	pub bash:         bool,
-	/// `multibyte` in a UTF-8 locale (`:l`, `:u` case whole characters).
-	pub multibyte:    bool,
 }
 
 /// A failed expansion: the message zsh prints (none for the silent
@@ -357,25 +335,17 @@ pub struct BangOpts {
 #[derive(Debug)]
 pub struct BangError(pub Option<Diag>, pub Option<BString>);
 
-impl BangError {
-	/// bash's message for the failure (`SPEC: event not found`, …), set by
-	/// [`expand_line`].
-	pub const fn bash(&self) -> Option<&BString> {
-		self.1.as_ref()
-	}
-}
-
 /// Why expansion stopped.
 pub enum Stop {
 	/// A step needs an answer.
-	Pending(Pending),
+	Pending,
 	/// The expansion failed.
 	Error(BangError),
 }
 
 impl From<Pending> for Stop {
-	fn from(p: Pending) -> Self {
-		Self::Pending(p)
+	fn from(_p: Pending) -> Self {
+		Self::Pending
 	}
 }
 
@@ -1126,11 +1096,6 @@ impl Run<'_, '_> {
 			}
 			match c {
 				Some(b'p') => self.ls.done = HISTFLAG_DONE | HISTFLAG_NOEXEC,
-				Some(b'a') => *sline = BString::from(chabspath(sline, &self.o.cwd)),
-				Some(b'A') => {
-					let abs = chabspath(sline, &self.o.cwd);
-					*sline = BString::from(self.realpath_prefix(abs)?);
-				},
 				Some(b'c') => {
 					if let Some(p) = self.which(sline)? {
 						*sline = p;
@@ -1181,12 +1146,6 @@ impl Run<'_, '_> {
 				Some(b'q') => *sline = quote(sline),
 				Some(b'Q') => *sline = unquote(sline),
 				Some(b'x') => *sline = quotebreak(sline),
-				Some(b'l') => {
-					*sline = BString::from(casemodify(sline, CaseMod::Lower, self.o.multibyte));
-				},
-				Some(b'u') => {
-					*sline = BString::from(casemodify(sline, CaseMod::Upper, self.o.multibyte));
-				},
 				Some(b'P') => {
 					let abs = if sline.first() == Some(&b'/') {
 						sline.to_vec()
@@ -1398,52 +1357,28 @@ pub fn remlpaths(s: &mut BString, count: usize) -> bool {
 	false
 }
 
-/// zsh `doexpandhist` (ZLE `expand-history`, `magic-space`): the history
-/// references of the edited line `line` (no newline) expanded as a fresh
-/// event of `h` would be, with the cursor `cs` moved along; `None` when
-/// nothing changed. Only the expansion's globals (`:s` strings, the last
-/// `!?str?` match) stay in `h`; the caller commits them.
-///
-/// # Errors
-/// As [`expand_line`].
-pub fn expand_for_zle(
-	h: &mut Hist,
-	line: &[u8],
-	cs: usize,
-	o: &BangOpts,
-	steps: &mut Steps<'_>,
-) -> Result<Option<(BString, usize)>, Stop> {
-	let defev = h
-		.curline
-		.as_ref()
-		.map_or_else(|| h.addhistnum(h.st.curhist, -1, HIST_FOREIGN), |l| l.defev);
-	let comments = h.curline.as_ref().is_some_and(|l| l.comments);
-	let mut ls = LineState { defev, comments, lex: Lex::new(), ..LineState::default() };
-	let inp = Input {
-		q:         line.iter().map(|&c| (c, false)).collect(),
-		from_hist: false,
-		raw_len:   line.len(),
-	};
-	let mut run = Run {
-		h: &mut *h,
-		ls: &mut ls,
-		inp,
-		o,
-		steps,
-		first: true,
-		qbang: false,
-		out: BString::default(),
-		marks: Marks::default(),
-		cursor: Some((cs as i64, line.len() as i64)),
-		err_pos: None,
-	};
-	run.line()?;
-	let excs = run.cursor.map_or(0, |c| c.0);
-	if ls.chline.as_slice() == line {
-		return Ok(None);
+/// zsh `convamps`: the replacement text of `:s`, `&` standing for the
+/// matched text `s` (`\&` a literal `&`).
+fn convamps(p: &[u8], s: &[u8]) -> BString {
+	let mut out = Vec::new();
+	let mut i = 0;
+	while i < p.len() {
+		match p[i] {
+			b'\\' if p.get(i + 1) == Some(&b'&') => {
+				out.push(b'&');
+				i += 2;
+			},
+			b'&' => {
+				out.extend_from_slice(s);
+				i += 1;
+			},
+			c => {
+				out.push(c);
+				i += 1;
+			},
+		}
 	}
-	let cs = usize::try_from(excs).unwrap_or(0).min(ls.chline.len());
-	Ok(Some((ls.chline, cs)))
+	BString::from(out)
 }
 
 /// zsh `quote` (`:q`): single-quote the text, quoted blanks kept apart.
@@ -1564,7 +1499,7 @@ mod tests {
 					h.st.linked = false;
 					return Err(d.map_or_else(String::new, |d| d.to_string()));
 				},
-				Err(Stop::Pending(_)) => panic!("no I/O expected"),
+				Err(Stop::Pending) => panic!("no I/O expected"),
 			}
 		}
 		let ls = h.curline.take().unwrap();

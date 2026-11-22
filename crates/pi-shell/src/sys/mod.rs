@@ -25,7 +25,6 @@ mod fs_ops;
 pub mod langinfo;
 mod lifecycle;
 mod park;
-pub mod pcre;
 #[cfg(unix)]
 pub mod proc;
 mod pump;

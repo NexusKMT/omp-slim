@@ -611,28 +611,6 @@ fn prune(fs: &mut dyn Fs) {
 	}
 }
 
-/// zsh `zsystem flock -u`'s close of lock fd `r`: its lock ends at once,
-/// even while a child vproc still shares the descriptor.
-pub fn release_lock(fs: &mut dyn Fs, r: &FdRef) {
-	let mut locks = LOCKS.lock();
-	let Some(at) = locks.iter().position(|h| h.token.is(r)) else {
-		drop(locks);
-		if let Some(handle) = r.os_handle() {
-			let _ = fs.lock_fd(handle, FdLock::Unlock);
-		}
-		return;
-	};
-	let gone = locks.remove(at);
-	// `fcntl`: closing one descriptor ends all of the owner's locks on the
-	// file.
-	locks.retain(|h| h.key != gone.key || h.owner != gone.owner);
-	if locks.iter().any(|h| h.key == gone.key) {
-		reassert(fs, &locks, gone.key);
-	} else {
-		let _ = fs.lock_fd(gone.handle, FdLock::Unlock);
-	}
-}
-
 /// How a [`FdProbe::Lock`] locks.
 struct LockHow {
 	write:       bool,

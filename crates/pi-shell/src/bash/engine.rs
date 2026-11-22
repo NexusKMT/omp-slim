@@ -12,7 +12,7 @@ use crate::bash::{
 	ids::{ModeId, Platform, UnitId, Vpid},
 	ir::{self, Unit},
 	syntax::{CompleteCommand, Features, NO_ALIASES, TextMode, tree::Tree},
-	vm::{ArithCache, PatternCache, TextKind, ZshPatternCache},
+	vm::{ArithCache, PatternCache, TextKind},
 };
 
 /// Text parsed at run time did not parse (or uses a construct this engine
@@ -65,21 +65,16 @@ impl Default for EngineConfig {
 /// address. `Send + Sync`; every [`Shell`](crate::bash::Shell) holds an `Arc`
 /// to it.
 pub struct Engine {
-	cfg:          EngineConfig,
-	units:        Mutex<UnitCache>,
+	cfg:      EngineConfig,
+	units:    Mutex<UnitCache>,
 	/// Units of text parsed at run time (here-document bodies, arithmetic).
-	texts:        Mutex<HashMap<(TextKind, ModeId, BString), Arc<Unit>>>,
+	texts:    Mutex<HashMap<(TextKind, ModeId, BString), Arc<Unit>>>,
 	/// Compiled arithmetic expressions by text (bounded; see
 	/// [`ArithCache::get`]).
-	arith:        ArithCache,
+	arith:    ArithCache,
 	/// Compiled shell patterns by text and options (bounded; see
 	/// [`PatternCache::get`]).
-	patterns:     PatternCache,
-	/// Compiled zsh patterns (bounded; see [`ZshPatternCache`]).
-	zsh_patterns: ZshPatternCache,
-	/// `$functions` bodies regenerated from function sources, by source
-	/// (regenerating means a parse; plugins scan `$functions` on every key).
-	bodies:       Mutex<HashMap<BString, BString>>,
+	patterns: PatternCache,
 }
 
 #[derive(Default)]
@@ -98,8 +93,6 @@ impl Engine {
 			texts: Mutex::new(HashMap::new()),
 			arith: ArithCache::default(),
 			patterns: PatternCache::default(),
-			zsh_patterns: ZshPatternCache::default(),
-			bodies: Mutex::new(HashMap::new()),
 		})
 	}
 
@@ -111,29 +104,6 @@ impl Engine {
 	/// The compiled-pattern cache.
 	pub(crate) const fn patterns(&self) -> &PatternCache {
 		&self.patterns
-	}
-
-	/// The compiled zsh-pattern cache.
-	pub(crate) const fn zsh_patterns(&self) -> &ZshPatternCache {
-		&self.zsh_patterns
-	}
-
-	/// The `$functions` body of the function whose source is `source`,
-	/// made by `make` the first time.
-	pub(crate) fn function_body(
-		&self,
-		source: &[u8],
-		make: impl FnOnce(&[u8]) -> BString,
-	) -> BString {
-		if let Some(body) = self.bodies.lock().get(source) {
-			return body.clone();
-		}
-		let body = make(source);
-		self
-			.bodies
-			.lock()
-			.insert(BString::from(source), body.clone());
-		body
 	}
 
 	/// The configuration.

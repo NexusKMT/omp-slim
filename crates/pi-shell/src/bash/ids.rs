@@ -196,23 +196,9 @@ pub enum ModeId {
 	/// bash 5.3.
 	#[default]
 	Bash,
-	/// zsh 5.9.
-	Zsh,
 	/// POSIX `sh` on the bash dialect (bash posix mode): `sh` invocation,
 	/// `emulate sh` from bash code.
 	Sh,
-	/// zsh's ksh emulation (`emulate ksh`).
-	Ksh,
-	/// zsh's sh emulation (`emulate sh` from zsh code, `zsh --emulate sh`):
-	/// the zsh dialect with zsh's sh option defaults.
-	#[strum(serialize = "zsh-sh")]
-	#[serde(rename = "zsh-sh")]
-	ZshSh,
-	/// zsh's csh emulation (`emulate csh`, `zsh --emulate csh`): the zsh
-	/// dialect with zsh's csh option defaults.
-	#[strum(serialize = "zsh-csh")]
-	#[serde(rename = "zsh-csh")]
-	ZshCsh,
 }
 
 crate::bash::packed_names::packed_names!(ModeId, Display);
@@ -220,20 +206,14 @@ crate::bash::packed_names::packed_names!(ModeId, Display);
 impl ModeId {
 	/// The engine personality this mode runs on.
 	pub const fn dialect(self) -> Dialect {
-		match self {
-			Self::Bash | Self::Sh => Dialect::Bash,
-			Self::Zsh | Self::Ksh | Self::ZshSh | Self::ZshCsh => Dialect::Zsh,
-		}
+		Dialect::Bash
 	}
 
 	/// The emulation's name as `emulate` prints it.
 	pub const fn emulation(self) -> &'static str {
 		match self {
 			Self::Bash => "bash",
-			Self::Zsh => "zsh",
-			Self::Sh | Self::ZshSh => "sh",
-			Self::Ksh => "ksh",
-			Self::ZshCsh => "csh",
+			Self::Sh => "sh",
 		}
 	}
 
@@ -243,13 +223,7 @@ impl ModeId {
 	pub const fn for_emulate(self, name: &[u8]) -> Option<Self> {
 		Some(match name {
 			b"bash" => Self::Bash,
-			b"zsh" => Self::Zsh,
-			b"ksh" => Self::Ksh,
-			b"csh" => Self::ZshCsh,
-			b"sh" => match self.dialect() {
-				Dialect::Bash => Self::Sh,
-				Dialect::Zsh => Self::ZshSh,
-			},
+			b"sh" => Self::Sh,
 			_ => return None,
 		})
 	}
@@ -264,8 +238,6 @@ impl ModeId {
 pub enum Dialect {
 	/// bash 5.3 (modes `bash`, `sh`).
 	Bash,
-	/// zsh 5.9 (modes `zsh`, `ksh`, `zsh-sh`).
-	Zsh,
 }
 
 /// Target platform semantics (signal numbers, default search paths, …);
@@ -618,7 +590,7 @@ impl IntrinsicId {
 			| Self::Ztcp
 			| Self::Zftp
 			| Self::Zdelattr
-			| Self::Zlistattr => matches!(dialect, Dialect::Zsh),
+			| Self::Zlistattr => false,
 			_ => true,
 		}
 	}

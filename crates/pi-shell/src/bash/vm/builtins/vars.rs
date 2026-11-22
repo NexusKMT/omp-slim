@@ -503,24 +503,6 @@ fn element_of_chain_start(
 	Ok(None)
 }
 
-/// bash code wrote `name`, which has zsh-only attributes: the lossy
-/// crossing's report (once per kind per crossing). Out of line, off the
-/// assignment path.
-#[cold]
-#[inline(never)]
-fn report_zsh_attrs(k: &mut Kernel, cx: &mut Cx<'_>, vp: &mut Vproc, name: &[u8]) {
-	let line = exec::current_line(vp);
-	let what = format!("zsh attributes of `{}'", name.as_bstr());
-	crate::bash::vm::mode::report_lossy(
-		k,
-		cx,
-		vp,
-		line,
-		crate::bash::store::LossyKind::ZshAttrs,
-		what,
-	);
-}
-
 /// [`set_value`] once name references are resolved.
 fn set_value_plain(
 	k: &mut Kernel,
@@ -569,16 +551,6 @@ fn set_value_plain(
 		return Ok(());
 	};
 	let cur = current(k, cx, vp, name, level)?;
-	// bash code writing a variable zsh code gave zsh-only attributes
-	// (float, padding, unique, hide): stored as bash writes it, the
-	// attributes not applied. `ZSH_ONLY` lies within the flag
-	// bits: no mask first.
-	if let Some(v) = cur.as_ref()
-		&& v.attrs.bits() & Attrs::ZSH_ONLY.bits() != 0
-		&& vp.mode.dialect() == crate::bash::ids::Dialect::Bash
-	{
-		report_zsh_attrs(k, cx, vp, name);
-	}
 	if let Some(v) = cur.as_ref().filter(|v| v.attrs.contains(Attrs::READONLY)) {
 		// bash checks an indexed element's subscript first (`c[-2]=4` on
 		// an empty readonly array is a bad subscript).
@@ -916,8 +888,7 @@ fn assign_in_place(
 		.with(Attrs::UPPER)
 		.with(Attrs::LOWER)
 		.with(Attrs::CAPITALIZE)
-		.with(Attrs::NAMEREF)
-		.with(Attrs::ZSH_ONLY);
+		.with(Attrs::NAMEREF);
 	let name = lhs.name;
 	if name == b"BASH_ARGV0" || name == b"BASH_XTRACEFD" || is_posix_var(name) {
 		return Ok(Some(value));
@@ -1138,7 +1109,7 @@ pub fn define_function(
 	cx: &mut Cx<'_>,
 	f: &FuncIr,
 	line: u32,
-	traced: bool,
+	_traced: bool,
 ) -> Flow {
 	let posix = state::option(&mut k.root, cx.store, vp, OptId::Posix).unwrap_or(false);
 	// bash's `valid_function_word`: no `$`, process substitution or quoting
@@ -1189,38 +1160,8 @@ pub fn define_function(
 		vp.status = 1;
 		return Flow::Next;
 	}
-	// zsh `execfuncdef`: a new definition has only `function -T`'s flag;
-	// a function redefining itself while it runs keeps its tracing.
-	let attrs = if mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		let mut fresh = if traced {
-			Attrs::ZSH_TRACE_ONCE
-		} else {
-			Attrs::NONE
-		};
-		use crate::bash::vm::proc::{FrameKind, ScriptKind};
-		let innermost = vp.frames.iter().rev().find_map(|fr| match &fr.kind {
-			FrameKind::Function { name, .. } => Some(Some(name)),
-			FrameKind::Script { what: ScriptKind::Source | ScriptKind::Eval, .. } => Some(None),
-			_ => None,
-		});
-		if innermost.flatten().is_some_and(|n| *n == f.name) {
-			for bit in [Attrs::TRACE, Attrs::ZSH_TRACE_ONCE] {
-				if attrs.contains(bit) {
-					fresh = fresh.with(bit);
-				}
-			}
-		}
-		fresh
-	} else {
-		attrs
-	};
-	// zsh records its `scriptfilename` (a `-c` string's functions are
-	// `zsh`'s, not `$0`'s), bash `BASH_SOURCE[0]`.
-	let file = if mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		super::zsh_print::scriptfilename(k, cx.store, vp)
-	} else {
-		crate::bash::vm::callstack::definition_file(k, cx.store, vp)
-	};
+	// bash `BASH_SOURCE[0]`.
+	let file = crate::bash::vm::callstack::definition_file(k, cx.store, vp);
 	let file = match file {
 		Ok(file) => file,
 		Err(e) => {
@@ -1228,7 +1169,7 @@ pub fn define_function(
 			return Flow::Discard(1);
 		},
 	};
-	let sticky = vp.sticky().cloned().map(Box::new);
+	let sticky = None;
 	let rec = Record::Func {
 		mode,
 		sticky,

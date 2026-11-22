@@ -89,23 +89,6 @@ pub fn usable(
 			.any(|w| w == name);
 		return Ok(on.then_some(IntrinsicId::Strmatch));
 	}
-	let resolved = resolved.filter(|&id| id != IntrinsicId::Strmatch);
-	// A zsh module's builtin exists while the module provides it or an
-	// autoload stub names it.
-	if let Some(id) = resolved
-		&& super::zsh_module::module_of(id).is_some()
-		&& !super::zsh_module::builtin_present(store, vp, id, name)?
-	{
-		return Ok(None);
-	}
-	// zsh: an autoload stub of a builtin no module of the engine defines
-	// (`zmodload -ab M NAME`) is a builtin, found before the path.
-	if resolved.is_none()
-		&& vp.mode.dialect() == crate::bash::ids::Dialect::Zsh
-		&& super::zsh_module::builtin_stub(store, vp, name)?
-	{
-		return Ok(Some(IntrinsicId::ModuleStub));
-	}
 	Ok(resolved)
 }
 

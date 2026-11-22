@@ -400,11 +400,10 @@ fn fresh_shell(
 		ov.vars
 			.insert(BString::from("PWD"), Some(Var::scalar(vp.cwd.clone(), Attrs::EXPORT)));
 	}
-	let zsh = args.mode.dialect() == crate::bash::ids::Dialect::Zsh;
 	let shlvl = env
 		.iter()
 		.find(|(n, _)| n.as_slice() == b"SHLVL")
-		.map_or(0, |(_, v)| super::imported_shlvl(v, zsh));
+		.map_or(0, |(_, v)| super::imported_shlvl(v));
 	ov.vars
 		.insert(BString::from("SHLVL"), Some(Var::scalar((shlvl + 1).to_string(), Attrs::EXPORT)));
 	// `$PPID` is the parent shell's `$$`.
@@ -416,14 +415,10 @@ fn fresh_shell(
 		_ => k.shell_pid,
 	};
 	let need_shell = !matches!(ov.vars.get(&b"SHELL"[..]), Some(Some(_)));
-	let values = if args.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		super::zsh_startup_values(cx, k.engine.config().platform)
-	} else {
-		startup_values(cx, &args.shell_name, ppid, super::StartupVars {
-			lookup_shell: need_shell,
-			interactive:  args.interactive,
-		})
-	};
+	let values = startup_values(cx, &args.shell_name, ppid, super::StartupVars {
+		lookup_shell: need_shell,
+		interactive:  args.interactive,
+	});
 	for (name, var, forced) in values {
 		if forced || !matches!(ov.vars.get(name), Some(Some(_))) {
 			ov.vars.insert(BString::from(name), Some(var));
@@ -448,17 +443,6 @@ fn fresh_shell(
 	}
 	state::sync_option_vars(&mut k.root, cx.store, &mut child)?;
 	child.mode = args.mode;
-	child.zsh = None;
-	if args.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		let start = super::mode::ZshStart {
-			mode:        args.mode,
-			options:     &args.zsh_options,
-			interactive: args.interactive,
-			login:       args.login_flag || args.login_name,
-			stdin:       matches!(args.input, Input::Stdin),
-		};
-		super::mode::init_zsh_options(&mut k.root, cx.store, &mut child, &start)?;
-	}
 	builtins::hard_ignore(k, cx.store, vp, &mut child)?;
 	Ok(child)
 }

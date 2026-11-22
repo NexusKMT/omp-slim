@@ -113,179 +113,6 @@ pub struct Vproc {
 	/// a run's explicit mode; inherited by children. The root's is written
 	/// through as `MiscKey::Mode`. Every event reports it.
 	pub mode:          ModeId,
-	/// zsh state of a vproc running zsh or mode-switching code (`None` for
-	/// pure bash: nothing to keep, nothing to check).
-	pub zsh:           Option<Box<VprocZsh>>,
-	/// The line editor's state ([`super::zle::Zle`]): keymaps, widgets,
-	/// kill ring and the line being edited; created when ZLE is first used.
-	/// Inherited (copied) by children; never serialized: a restored shell
-	/// starts with zsh's defaults and no line in progress.
-	pub zle:           Option<Box<super::zle::Zle>>,
-}
-
-/// The terminal of the session a vproc runs in when it is not the shell's
-/// ([`VprocZsh::ctty`]).
-#[derive(Clone, Debug, Default)]
-pub struct Ctty(pub Option<FdRef>);
-
-impl PartialEq for Ctty {
-	fn eq(&self, other: &Self) -> bool {
-		match (&self.0, &other.0) {
-			(Some(a), Some(b)) => a.same(b),
-			(None, None) => true,
-			_ => false,
-		}
-	}
-}
-
-impl Eq for Ctty {}
-
-/// A vproc's zsh state ([`Vproc::zsh`]).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VprocZsh {
-	/// zsh's current sticky emulation (zsh's global `sticky`): set while
-	/// `emulate MODE -c` runs and inside a sticky function; a function
-	/// defined meanwhile records it.
-	pub sticky:             Option<crate::bash::store::Sticky>,
-	/// What frames restore when they end: `(frame count with the frame on
-	/// top, saved state)` for the `eval` frame of `emulate … -c` (zsh
-	/// `bin_emulate`) and a trap running in another mode; innermost last.
-	pub restores:           Vec<(u32, crate::bash::store::ZshScope)>,
-	/// zsh `exit_pending`: `exit N` ran inside a function: `(N, the call
-	/// depth then)` (zsh `exit_val`, `exit_level`). The functions return one
-	/// by one down from that depth (their `always` lists and `EXIT` traps
-	/// run; a call those lists make runs to its end), then the shell exits
-	/// with N.
-	pub exit_pending:       Option<(i32, u32)>,
-	/// The diagnostic site a subshell of zsh code inherits (zsh forks keep
-	/// `scriptname`): its parent's script name and the script line its
-	/// lines count from (a function's definition line); used when none of
-	/// its own frames names a site (`Kernel::zsh_site`).
-	pub site:               Option<(BString, u32)>,
-	/// The `zsh_eval_context` a subshell of zsh code starts with: its
-	/// parent's when it started (zsh forks keep the context stack); empty
-	/// for none.
-	pub context:            Vec<BString>,
-	/// The `zsh_eval_context` word of a subshell's first frame when it is
-	/// not a command substitution's (`zpty`, whose command zsh runs with
-	/// `execode(…, "zpty")`).
-	pub first_context:      Option<BString>,
-	/// zsh/zpty's commands (zsh `ptycmds`); a subshell starts with a copy,
-	/// as a zsh fork keeps the table.
-	pub ptys:               crate::bash::vm::builtins::zsh_mod_zpty::PtyTable,
-	/// The terminal of the session this vproc runs in (zsh's `SHTTY` of a
-	/// zpty child): the slave of the `zpty` that started it (or an
-	/// ancestor). Inherited by children, opened for `/dev/tty`, handed to
-	/// every external it spawns ([`crate::bash::SpawnSpec::ctty`]). Never
-	/// serialized: a pty is a host object, lost on restore like the host fds.
-	#[serde(skip)]
-	pub ctty:               Ctty,
-	/// zsh/curses' state (ncurses' screen and zsh's window table) once
-	/// `zcurses init` ran; a subshell starts with a copy, as a zsh fork has
-	/// its own.
-	pub curses:             Option<Box<crate::bash::vm::builtins::zsh_mod_curses::screen::Curses>>,
-	/// zsh `zexit`'s hooks under way or done ([`crate::bash::vm::zsh::zexit`]).
-	/// A subshell starts without.
-	#[serde(default)]
-	pub zexit:              Option<crate::bash::vm::zsh::zexit::ZExit>,
-	/// The shell is exiting because of an `exit` inside a function (zsh's
-	/// `exit_pending` when `zexit` runs; the engine clears
-	/// [`Self::exit_pending`] once the functions have returned).
-	#[serde(default)]
-	pub exit_from_function: bool,
-	/// zsh's `lastmathval`: the value of the last arithmetic evaluation,
-	/// which a user math function returns (zsh `callmathfunc`).
-	#[serde(default)]
-	pub last_math:          Option<LastMath>,
-	/// Files of `=(…)` substitutions: `(frame depth, path)` as
-	/// [`Vproc::procsubs`]; removed when the command is over (zsh's job
-	/// `filelist`). A subshell starts without.
-	#[serde(default)]
-	pub tempfiles:          Vec<(u32, BString)>,
-	/// The code (and line) of a glob's shell-code qualifier to run above
-	/// the op that returned [`Flow::Call`](super::exec::Flow::Call) for it
-	/// (zsh `qualsheval`); pushed by the run loop, which drops it when the
-	/// op returned anything else. Never imaged: it lives within one op step.
-	#[serde(skip)]
-	pub glob_hook:          Option<(BString, u32)>,
-}
-
-/// A number as zsh's `lastmathval` keeps it ([`VprocZsh::last_math`]); a
-/// float by its bits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LastMath {
-	/// An integer.
-	Int(i64),
-	/// A double, `f64::to_bits`.
-	Float(u64),
-}
-
-impl VprocZsh {
-	/// Whether it holds nothing (the vproc drops it).
-	const fn is_empty(&self) -> bool {
-		self.sticky.is_none()
-			&& self.restores.is_empty()
-			&& self.exit_pending.is_none()
-			&& self.site.is_none()
-			&& self.context.is_empty()
-			&& self.first_context.is_none()
-			&& self.tempfiles.is_empty()
-			&& self.ptys.is_empty()
-			&& self.ctty.0.is_none()
-			&& self.curses.is_none()
-			&& self.zexit.is_none()
-			&& !self.exit_from_function
-			&& self.last_math.is_none()
-			&& self.glob_hook.is_none()
-	}
-}
-
-impl Vproc {
-	/// zsh's current sticky emulation.
-	pub fn sticky(&self) -> Option<&crate::bash::store::Sticky> {
-		self.zsh.as_ref().and_then(|z| z.sticky.as_ref())
-	}
-
-	/// Set (or clear) the current sticky emulation.
-	pub fn set_sticky(&mut self, sticky: Option<crate::bash::store::Sticky>) {
-		match (&mut self.zsh, sticky) {
-			(Some(z), s) => z.sticky = s,
-			(None, Some(s)) => {
-				self.zsh = Some(Box::new(VprocZsh { sticky: Some(s), ..VprocZsh::default() }));
-			},
-			(None, None) => {},
-		}
-		self.trim_zsh();
-	}
-
-	/// Keep `saved` for the frame now on top, restored when it pops.
-	pub fn push_restore(&mut self, saved: crate::bash::store::ZshScope) {
-		let depth = u32::try_from(self.frames.len()).unwrap_or(u32::MAX);
-		self
-			.zsh
-			.get_or_insert_with(Box::default)
-			.restores
-			.push((depth, saved));
-	}
-
-	/// The state the frame popped at `depth` (the frame count with it on
-	/// top) restores, if any.
-	pub fn take_restore(&mut self, depth: u32) -> Option<crate::bash::store::ZshScope> {
-		let z = self.zsh.as_mut()?;
-		let saved = match z.restores.last() {
-			Some((d, _)) if *d == depth => z.restores.pop().map(|(_, s)| s),
-			_ => None,
-		};
-		self.trim_zsh();
-		saved
-	}
-
-	/// Drop the side table once it holds nothing.
-	pub(super) fn trim_zsh(&mut self) {
-		if self.zsh.as_deref().is_some_and(VprocZsh::is_empty) {
-			self.zsh = None;
-		}
-	}
 }
 
 /// A set of trap keys ([`Vproc::own_traps`]): the pseudo-signals and the
@@ -927,17 +754,6 @@ pub enum CodeKind {
 	RegexAction,
 }
 
-impl CodeKind {
-	/// The context name zsh passes to `execode`/`execstring`.
-	pub const fn context(self) -> &'static str {
-		match self {
-			Self::Style => "style",
-			Self::RegexGuard => "zregexparse-guard",
-			Self::RegexAction => "zregexparse-action",
-		}
-	}
-}
-
 impl FrameKind {
 	pub fn script(src: &[u8], pos: Pos, what: ScriptKind) -> Self {
 		Self::Script {
@@ -1243,29 +1059,28 @@ impl Scratch {
 #[derive(Default)]
 pub struct ScratchIo {
 	/// Progress of a `Redir` op or the redirection stage of an `Exec`.
-	pub redir:   RedirProgress,
+	pub redir:    RedirProgress,
 	/// fds saved by the `Exec`'s own redirections.
-	pub saved:   Vec<Saved>,
+	pub saved:    Vec<Saved>,
 	/// Results of file probes and lookups (pollable builtins, `[[ -f ]]`).
-	pub probes:  Vec<(Probe, ProbeResult)>,
+	pub probes:   Vec<(Probe, ProbeResult)>,
 	/// The probe whose fs operation is in flight (`Scratch::live`), with its
 	/// partial progress.
-	pub probing: Option<Probe>,
+	pub probing:  Option<Probe>,
 	/// PATH search of the probe in flight.
-	pub search:  Option<PathSearch>,
+	pub search:   Option<PathSearch>,
 	/// Bytes read so far by an `Input`/`Read` probe.
-	pub input:   Vec<u8>,
+	pub input:    Vec<u8>,
 	/// The pathname-expansion walk of the `Glob` probe in flight.
-	pub walk:    Option<Box<super::glob::Walk>>,
-	/// The zsh part ([`ScratchZsh`]), created by zsh code on first use
-	/// ([`Self::zsh()`]): a bash op's progress neither carries nor clears it.
-	pub zsh:     Option<Box<ScratchZsh>>,
+	pub walk:     Option<Box<super::glob::Walk>>,
+	/// An interactive prompt was printed for the line being read.
+	pub prompted: bool,
 }
 
 impl ScratchIo {
 	/// Clear for the next op, keeping the vectors' allocations.
 	fn clear(&mut self) {
-		let Self { redir, saved, probes, probing, search, input, walk, zsh } = self;
+		let Self { redir, saved, probes, probing, search, input, walk, prompted } = self;
 		*redir = RedirProgress::default();
 		saved.clear();
 		probes.clear();
@@ -1273,48 +1088,7 @@ impl ScratchIo {
 		*search = None;
 		input.clear();
 		*walk = None;
-		if let Some(z) = zsh {
-			z.clear();
-		}
-	}
-
-	/// The op's zsh I/O progress, created on first use.
-	pub fn zsh(&mut self) -> &mut ScratchZsh {
-		self.zsh.get_or_insert_with(Box::default)
-	}
-}
-
-/// The I/O progress only zsh code keeps ([`ScratchIo::zsh`]).
-#[derive(Default)]
-pub struct ScratchZsh {
-	/// The zsh filename-generation walk of the `Glob` probe in flight (not
-	/// imaged, like [`ScratchIo::walk`]: a restored op restarts its walk).
-	pub zglob:     Option<Box<super::zsh::zglob::Walk>>,
-	/// zsh `multios`: per fd redirected by this list, whether it is an
-	/// output and the objects it was redirected to so far (zsh `mfds`).
-	pub multio:    Vec<(i32, bool, Vec<FdRef>)>,
-	/// zsh `xpandredir`: a redirection whose target expanded to several
-	/// words becomes one redirection per word (index in the list, word),
-	/// applied after the list's own; [`RedirProgress::done`] counts on
-	/// through them.
-	pub more:      Vec<(u32, BString)>,
-	/// The `fcntl` lock a history file operation holds (zsh `flock_fd`,
-	/// `histfcntllock`), released with the op (not imaged).
-	pub hist_lock: Option<Box<dyn crate::bash::fs::File>>,
-	/// The results so far of the `StatAll` probe in flight (zsh's `$fpath`
-	/// search).
-	pub stats:     Vec<Option<crate::bash::fs::Stat>>,
-}
-
-impl ScratchZsh {
-	/// Clear for the next op, keeping the vectors' allocations.
-	fn clear(&mut self) {
-		let Self { zglob, multio, more, hist_lock, stats } = self;
-		*zglob = None;
-		multio.clear();
-		more.clear();
-		*hist_lock = None;
-		stats.clear();
+		*prompted = false;
 	}
 }
 
@@ -1374,19 +1148,6 @@ pub struct RedirProgress {
 pub enum Probe {
 	/// `stat(path)` (`follow` = not `lstat`).
 	Stat { path: BString, follow: bool },
-	/// `stat` of each path in turn, following links, up to the first that
-	/// names a file at one of the indices `ends` (zsh's `$fpath` search: a
-	/// definition file ends it, a word code file it passes does not):
-	/// [`ProbeResult::Stats`], as many as were asked. One probe for a
-	/// stretch of the search that would otherwise ask (and restart its
-	/// builtin) once per path; a hit never waits on the directories after
-	/// it.
-	StatAll { paths: Vec<BString>, ends: Vec<u32> },
-	/// Whether a zsh word code digest holds a loadable function
-	/// ([`DumpQuery`]): [`ProbeResult::Ok`]. Read once per digest and
-	/// remembered by the shell ([`super::Kernel::dump_funcs`]): an `$fpath`
-	/// search asks of the same digests for every function.
-	DumpHas(Box<DumpQuery>),
 	/// `access(path, mode bits)`.
 	Access { path: BString, mode: u8 },
 	/// PATH search for a command name over `$PATH` = `path`.
@@ -1427,28 +1188,10 @@ pub enum Probe {
 	/// zsh/attr, zsh/mapfile): [`ProbeResult::Fs`]. `seq` numbers the
 	/// asker's requests, so one made twice is asked twice.
 	Fs { seq: u32, req: Box<super::fsprobe::FsReq> },
-	/// An operation of the zsh/zftp `zftp` builtin (network, terminal,
-	/// files): [`ProbeResult::Zftp`]. `seq` numbers the builtin's
-	/// operations within the command. Performed by
-	/// [`super::probe::perform_mut`].
-	Zftp { seq: u32, op: Box<super::builtins::zsh_mod_zftp::ZftpOp> },
 	/// A filesystem or clock step of a history file operation
 	/// ([`super::builtins::history::io`]): [`ProbeResult::Hist`]. `seq`
 	/// numbers the operation's steps.
 	Hist { seq: u32, op: Box<super::builtins::history::io::HistOp> },
-}
-
-/// The question of a [`Probe::DumpHas`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DumpQuery {
-	/// The digest.
-	pub path:     BString,
-	/// The function (metafied).
-	pub name:     BString,
-	/// The digest's modification time, as `stat` saw it.
-	pub mtime_ns: i64,
-	/// The digest's size, as `stat` saw it.
-	pub size:     u64,
 }
 
 impl Probe {
@@ -1461,8 +1204,6 @@ impl Probe {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProbeResult {
 	Stat(Option<crate::bash::fs::Stat>),
-	/// The answers of a [`Probe::StatAll`], in its order.
-	Stats(Vec<Option<crate::bash::fs::Stat>>),
 	Ok(bool),
 	Path(Option<BString>),
 	/// File contents, or the `strerror` text of the failure.
@@ -1479,8 +1220,6 @@ pub enum ProbeResult {
 	Fd(Box<super::fdprobe::FdAnswer>),
 	/// Answer of a [`Probe::Fs`].
 	Fs(super::fsprobe::FsResult),
-	/// Answer of a [`Probe::Zftp`].
-	Zftp(Box<super::builtins::zsh_mod_zftp::ZftpAns>),
 	/// Answer of a [`Probe::Hist`].
 	Hist(Box<super::builtins::history::io::HistAnswer>),
 }
@@ -1713,8 +1452,6 @@ pub enum Live {
 	Fd(Box<super::fdprobe::FdLive>),
 	/// A request of a [`Probe::Fs`] in flight.
 	Fs(Box<super::fsprobe::FsLive>),
-	/// An operation of a [`Probe::Zftp`] in flight (sockets, timers).
-	Zftp(Box<super::builtins::zsh_mod_zftp::ZftpLive>),
 }
 
 impl Live {
@@ -1738,7 +1475,7 @@ impl Live {
 			Self::Fs(live) => live.idempotent,
 			Self::File(file) => file.kind() == crate::bash::fs::FileKind::Regular,
 			// Network traffic is not asked twice.
-			Self::Task(_) | Self::Ext(_) | Self::Timer(_) | Self::Zftp(_) | Self::None => false,
+			Self::Task(_) | Self::Ext(_) | Self::Timer(_) | Self::None => false,
 		}
 	}
 }

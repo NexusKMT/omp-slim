@@ -1,9 +1,9 @@
 //! The terminal seam: what a shell asks of the terminals its host has.
 //!
 //! [`Host::terminal`](crate::bash::Host::terminal) returns a [`Terminal`]
-//! when the host runs on real terminals (the process shell, `omp zsh`);
-//! hosts without terminals (agent shells) return `None`, and
-//! everything that needs one (ZLE, job control's terminal handoff, `zpty`)
+//! when the host runs on real terminals (the process shell, `omp bash`/`omp
+//! sh`); hosts without terminals (agent shells) return `None`, and
+//! everything that needs one (job control's terminal handoff, `zpty`)
 //! then reports that no terminal is available.
 //!
 //! Terminals are addressed by the [`OsHandle`] of an open [`File`]

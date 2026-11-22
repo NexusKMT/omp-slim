@@ -22,10 +22,9 @@ struct Ran {
 /// read from standard input by an interactive shell when `interactive`,
 /// else as `-c`.
 fn run(mode: ModeId, profile: Profile, fs: &MemFs, interactive: bool, src: &str) -> Ran {
-	let zsh = mode == ModeId::Zsh;
 	let init = ShellInit {
 		mode,
-		argv0: if zsh { "zsh" } else { "bash" }.into(),
+		argv0: "bash".into(),
 		interactive,
 		profile,
 		env: vec![
@@ -33,11 +32,7 @@ fn run(mode: ModeId, profile: Profile, fs: &MemFs, interactive: bool, src: &str)
 			("HOME".into(), "/h".into()),
 			("PS1".into(), "".into()),
 		],
-		options: if zsh {
-			vec![("promptsp".into(), false)]
-		} else {
-			Vec::new()
-		},
+		options: Vec::new(),
 		..skeleton_init(&[])
 	};
 	let mut host = FakeHost::new().with_fs(fs.clone());
@@ -65,37 +60,6 @@ fn home() -> MemFs {
 	fs
 }
 
-/// An interactive zsh with `HISTFILE` set: the user's shell reads the file,
-/// records events, writes `fc -W` files and saves at exit; the tool's
-/// records nothing, reads nothing, fails `fc -W` without creating anything
-/// (no file, no `.LOCK`) and does not save at exit.
-#[test]
-fn zsh_history_files_and_recording() {
-	let src = "HISTFILE=/h/hist; SAVEHIST=10; unsetopt histsavebycopy\nfc -R\necho one\nprint -r \
-	           -- ${#history}\nprint -s pushed\nfc -W /h/out\n";
-	let user = home();
-	let ran = run(ModeId::Zsh, Profile::User, &user, true, src);
-	assert_ne!(ran.out.lines().last(), Some("0"), "user shell keeps history: {}", ran.out);
-	assert!(user.read("/h/out").is_some());
-	assert_ne!(user.read("/h/hist").unwrap(), b": 1600000000:5;echo old\n");
-
-	let tool = home();
-	let ran = run(ModeId::Zsh, Profile::Tool, &tool, true, src);
-	assert_eq!(ran.out, "one\n0\n");
-	// Only `fc -W` complains: the exit save does not run.
-	assert_eq!(
-		ran.err
-			.matches("history files are not available in this shell")
-			.count(),
-		1,
-		"{}",
-		ran.err
-	);
-	assert!(tool.read("/h/out").is_none());
-	assert!(tool.read("/h/out.LOCK").is_none());
-	assert_eq!(tool.read("/h/hist").unwrap(), b": 1600000000:5;echo old\n");
-}
-
 /// An interactive bash: the tool's records nothing, `history -r/-w` fail,
 /// and it has no programmable completion (`compgen`, `complete`) or
 /// readline bindings (`bind`), as a bash built without readline.
@@ -118,41 +82,20 @@ fn bash_history_and_completion() {
 	}
 }
 
-/// The line editor's and the completion system's modules do not load in a
-/// tool shell (so neither do their builtins); other modules do.
-#[test]
-fn no_line_editor_or_completion_modules() {
-	let src = "for m in zsh/zle zsh/complete zsh/complist zsh/computil zsh/datetime; do zmodload \
-	           $m 2>/dev/null; print -n $?; done; echo; (bindkey -l) >/dev/null 2>&1; echo $?; \
-	           (compadd x)";
-	// `compadd` fails outside a completion widget either way; only the
-	// tool's cannot load it.
-	let ran = run(ModeId::Zsh, Profile::User, &MemFs::new(), false, src);
-	assert_eq!(ran.out, "00000\n0\n");
-	assert!(!ran.err.contains("zsh/complete"), "{}", ran.err);
-	let ran = run(ModeId::Zsh, Profile::Tool, &MemFs::new(), false, src);
-	assert_eq!(ran.out, "11110\n1\n");
-	assert!(ran.err.contains("zsh/complete"), "{}", ran.err);
-}
-
-/// A nested interactive `zsh -i`/`bash -i` started by a tool shell reads
-/// the non-interactive startup files only: no `.zshrc` or `.bashrc`, where
-/// completion and history are set up.
+/// A nested interactive `bash -i` started by a tool shell reads the
+/// non-interactive startup files only: no `.bashrc`, where completion and
+/// history are set up.
 #[test]
 fn nested_interactive_shells_skip_rc_files() {
 	let fs = MemFs::new();
-	fs.add_file("/h/.zshenv", b"echo zshenv\n", 0o644);
-	fs.add_file("/h/.zshrc", b"echo zshrc\n", 0o644);
 	fs.add_file("/h/.bashrc", b"echo bashrc\n", 0o644);
-	let src = "zsh -i -c 'echo zcmd'; bash -i -c 'echo bcmd'";
+	let src = "bash -i -c 'echo bcmd'";
 	let ran = run(ModeId::Bash, Profile::User, &fs, false, src);
-	for line in ["zshenv", "zshrc", "zcmd", "bashrc", "bcmd"] {
+	for line in ["bashrc", "bcmd"] {
 		assert!(ran.out.lines().any(|l| l == line), "user shell missed {line}: {}", ran.out);
 	}
 	let ran = run(ModeId::Bash, Profile::Tool, &fs, false, src);
-	for line in ["zshenv", "zcmd", "bcmd"] {
-		assert!(ran.out.lines().any(|l| l == line), "tool shell missed {line}: {}", ran.out);
-	}
-	assert!(!ran.out.contains("zshrc") && !ran.out.contains("bashrc"), "{}", ran.out);
+	assert!(ran.out.lines().any(|l| l == "bcmd"), "tool shell missed bcmd: {}", ran.out);
+	assert!(!ran.out.contains("bashrc"), "{}", ran.out);
 	assert_eq!(ran.status, 0);
 }

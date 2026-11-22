@@ -304,35 +304,6 @@ pub fn function_from_source(src: &[u8], mode: ModeId, features: syn::Features) -
 	lone_function(syn::Parser::new(src, features, syn::NO_ALIASES), src, mode, features)
 }
 
-/// A function definition with `src`'s first line numbered `line`, retaining
-/// its parsed body until first call. An autoloaded file wrapped in a
-/// definition on line 0 keeps the file's line numbers.
-pub fn function_from_source_at(
-	src: &[u8],
-	mode: ModeId,
-	features: syn::Features,
-	line: u32,
-) -> Option<FuncIr> {
-	let mut parser =
-		syn::Parser::new(src, features, syn::NO_ALIASES).with_pos(syn::Pos { offset: 0, line });
-	let cc = parser.next_command()?.ok()?;
-	if parser.next_command().is_some() {
-		return None;
-	}
-	function_from_parsed(&cc, src, mode, features)
-}
-
-/// A validated single-command function definition, retaining its parsed body
-/// until first call. Autoload uses the command from its syntax-checking pass.
-pub(crate) fn function_from_parsed(
-	cc: &syn::CompleteCommand,
-	src: &[u8],
-	mode: ModeId,
-	features: syn::Features,
-) -> Option<FuncIr> {
-	lone_definition(lower_deferred(cc, src, mode, features).ok()?)
-}
-
 /// The function `parser` reads from `src` when it is the lone command.
 fn lone_function(
 	mut parser: syn::Parser<'_>,
@@ -552,20 +523,10 @@ impl Lower {
 	}
 
 	fn list(&mut self, list: st::List<'_>) -> R {
-		// zsh `execlist`: an empty list (`do done`, `{ }`) returns status 0.
-		if list.items().is_empty() && self.unit.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-			self.emit(Opcode::SetStatus, 0, 0, 0);
-			return Ok(());
-		}
-		let zsh = self.unit.mode.dialect() == crate::bash::ids::Dialect::Zsh;
 		for item in list.items() {
 			let ao = item.and_or();
 			let ao_id = ao.id().0;
 			let sep = item.sep();
-			// zsh `execlist` runs the DEBUG trap before (`DEBUG_BEFORE_CMD`)
-			// or after each list: a `Nop` with `b` 1 marks its start (`a` the
-			// end marker, where a skipped list goes), one with `b` 2 its end.
-			let start = zsh.then(|| self.emit(Opcode::Nop, 0, Op::LIST_START, ao_id));
 			if matches!(sep, syn::Sep::Amp | syn::Sep::Disown) {
 				let spawn = self.unit.spawns.len() as u32;
 				self.unit.spawns.push(SpawnIr {
@@ -587,10 +548,6 @@ impl Lower {
 				s.end = end;
 			} else {
 				self.and_or(ao)?;
-			}
-			if let Some(start) = start {
-				let end = self.emit(Opcode::Nop, 0, Op::LIST_END, ao_id);
-				self.patch_a(start, end);
 			}
 		}
 		Ok(())
@@ -964,15 +921,6 @@ impl Lower {
 				self.node(cid, NodeKind::FuncDef, cspan);
 				let func = self.funcdef(cmd, f)?;
 				let traced = if f.traced() { Op::TRACED } else { 0 };
-				// zsh `execfuncdef`: names with expansions (`function f$$`)
-				// are expanded when the definition runs; `b` is their word
-				// list plus one, and that one op defines every name.
-				if let Some((t, root)) = zsh_funcdef_words(cspan, f, self.unit.mode) {
-					let list = self.word_list(st::At::new(&t, root).seq(0))?;
-					let pc = self.emit(Opcode::FuncDef, func, list + 1, id);
-					self.unit.ops[pc as usize].flags |= traced;
-					return Ok(());
-				}
 				let pc = self.emit(Opcode::FuncDef, func, 0, id);
 				self.unit.ops[pc as usize].flags |= traced;
 				// zsh `f g () { … }`: every name gets the body.
@@ -1263,34 +1211,15 @@ impl Lower {
 				Some(st::Part::Lit(n)) => {
 					matches!(n, b"declare" | b"typeset" | b"export" | b"readonly" | b"local")
 				},
-				// `private`: the reserved word zsh/param/private adds.
-				Some(st::Part::Zsh(n)) => matches!(
-					n,
-					b"declare"
-						| b"export"
-						| b"float"
-						| b"integer"
-						| b"local"
-						| b"private"
-						| b"readonly"
-						| b"typeset"
-				),
 				_ => false,
 			});
 		let mut list = Vec::with_capacity(words.len());
 		for w in words {
 			let parts = w.parts();
-			let mut it = parts.iter().map(st::WordPart::get);
-			let kind = match (it.next(), it.next(), it.next()) {
-				(Some(st::Part::Zsh(_)), Some(st::Part::Compound(_)), None) if decl => {
-					WordKind::DeclArg
-				},
-				(Some(st::Part::Zsh(t)), None, _) if decl && zsh_envstring(t) => WordKind::DeclArg,
-				_ => match (assignment_like(parts), decl) {
-					(false, _) => WordKind::Plain,
-					(true, false) => WordKind::AssignArg,
-					(true, true) => WordKind::DeclArg,
-				},
+			let kind = match (assignment_like(parts), decl) {
+				(false, _) => WordKind::Plain,
+				(true, false) => WordKind::AssignArg,
+				(true, true) => WordKind::DeclArg,
 			};
 			list.push(self.word_as(w, kind)?);
 		}
@@ -1382,8 +1311,7 @@ impl Lower {
 			| Part::BadSubst(_)
 			| Part::ComsubSyntax { .. } => false,
 			Part::Comsub { .. } | Part::ProcSub { .. } => true,
-			// zsh words are parsed when they expand: any may substitute.
-			Part::Zsh(text) => crate::bash::syntax::zsh::tok::has_token(text),
+			Part::Zsh(_) => false,
 			Part::Arith { text, .. } => text.contains(&b'$') || text.contains(&b'`'),
 			Part::Compound(elems) => elems
 				.iter()
@@ -1590,115 +1518,9 @@ impl Lower {
 	}
 }
 
-/// The name a definition gives function `name` as written: zsh substitutes
-/// the names (`execfuncdef`), so `function 'a b' () …` defines `a b`; the
-/// quoting is removed here (`$'…'` decoded, NULs kept), a name with an
-/// expansion (`$`, `` ` ``) stays as written. bash takes the word as
-/// written.
-fn func_name(name: &[u8], mode: ModeId) -> BString {
-	if mode.dialect() != crate::bash::ids::Dialect::Zsh
-		|| !name.iter().any(|c| matches!(c, b'\'' | b'"' | b'\\'))
-	{
-		return BString::from(name);
-	}
-	let mut out = Vec::with_capacity(name.len());
-	let mut i = 0;
-	while let Some(&c) = name.get(i) {
-		i += 1;
-		match c {
-			b'\'' => {
-				let rest = name.get(i..).unwrap_or_default();
-				let len = rest.iter().position(|&c| c == b'\'').unwrap_or(rest.len());
-				out.extend_from_slice(rest.get(..len).unwrap_or_default());
-				i += len + 1;
-			},
-			b'"' => {
-				while let Some(&d) = name.get(i) {
-					i += 1;
-					match d {
-						b'"' => break,
-						b'$' | b'`' => return BString::from(name),
-						b'\\' if let Some(&e @ (b'$' | b'`' | b'"' | b'\\')) = name.get(i) => {
-							out.push(e);
-							i += 1;
-						},
-						_ => out.push(d),
-					}
-				}
-			},
-			b'\\' => {
-				if let Some(&d) = name.get(i) {
-					out.push(d);
-					i += 1;
-				}
-			},
-			b'$' if name.get(i) == Some(&b'\'') => {
-				let start = i + 1;
-				let mut end = start;
-				while let Some(&d) = name.get(end) {
-					match d {
-						b'\'' => break,
-						b'\\' => end += 2,
-						_ => end += 1,
-					}
-				}
-				let end = end.min(name.len());
-				out.extend_from_slice(&syn::ansi_decode_all(&name[start..end]));
-				i = end + 1;
-			},
-			b'$' | b'`' => return BString::from(name),
-			_ => out.push(c),
-		}
-	}
-	BString::from(out)
-}
-
-/// The names of zsh definition `f` as words to expand when it runs, when
-/// one of them has an expansion or a pattern (zsh `execfuncdef`'s `htok`
-/// beyond quoting); `None` keeps the names as written. The words are the
-/// children of the returned root, spanning `span`.
-fn zsh_funcdef_words(span: syn::Span, f: st::FuncDef<'_>, mode: ModeId) -> Option<(st::Tree, u32)> {
-	use syn::zsh::tok;
-	if mode.dialect() != crate::bash::ids::Dialect::Zsh {
-		return None;
-	}
-	let toks = std::iter::once(f.name())
-		.chain(f.extra_names())
-		.map(|n| syn::zsh::parse_subst_string(&tok::metafy(n)).ok())
-		.collect::<Option<Vec<_>>>()?;
-	let expands = |t: &Vec<u8>| {
-		t.iter().any(|&c| {
-			matches!(
-				c,
-				tok::POUND
-					| tok::STRING
-					| tok::HAT
-					| tok::STAR
-					| tok::INPAR
-					| tok::QSTRING
-					| tok::EQUALS
-					| tok::BAR
-					| tok::INBRACE
-					| tok::INBRACK
-					| tok::TICK
-					| tok::INANG
-					| tok::QUEST
-					| tok::TILDE
-					| tok::QTICK
-			)
-		})
-	};
-	if !toks.iter().any(expands) {
-		return None;
-	}
-	let mut t = st::Tree::default();
-	let mark = t.open();
-	for text in &toks {
-		let w = t.zword(text, span);
-		t.kid(mark, w);
-	}
-	let root = t.words_at(mark);
-	Some((t, root.index()))
+/// The name a definition gives function `name` as written.
+fn func_name(name: &[u8], _mode: ModeId) -> BString {
+	BString::from(name)
 }
 
 /// Materialize validated function input for a record's first text reader.
@@ -1726,15 +1548,10 @@ pub(super) fn definition_text(name: &[u8], definition: &FuncDefinition, body: &U
 	func_source(st::Command::at(&tree, root), name, body.mode)
 }
 
-/// The canonical text of function `name` defined by `cmd`: zsh's function
-/// text (`functions name`, zsh `text.c`) for zsh code, else `declare -f`'s;
-/// a zsh definition of several names (`f g () { … }`) prints each name
-/// alone.
-fn func_source(cmd: st::Command<'_>, name: &[u8], mode: ModeId) -> BString {
+/// The canonical text of function `name` defined by `cmd`:
+/// `declare -f`'s, or each name alone when the definition has several.
+fn func_source(cmd: st::Command<'_>, name: &[u8], _mode: ModeId) -> BString {
 	match cmd.kind() {
-		st::CommandKind::FuncDef(f) if mode.dialect() == crate::bash::ids::Dialect::Zsh => {
-			BString::from(syn::zsh::function_text(name, f))
-		},
 		st::CommandKind::FuncDef(f) if f.extra_names().len() > 0 => {
 			BString::from(syn::print_function_as(cmd, name))
 		},
@@ -1763,27 +1580,6 @@ fn u32_to_utf8(v: u32, out: &mut Vec<u8>) {
 	for k in (0..len - 1).rev() {
 		out.push(0x80 | ((v >> (6 * k)) & 0x3f) as u8);
 	}
-}
-
-/// Whether a zsh word (token string) was lexed as `ENVSTRING` in a
-/// `TYPESET` command: a number, or a name with an optional subscript,
-/// then an optional `+` and an unquoted `=` (zsh `gettok`, which leaves
-/// that `=` untokenized).
-fn zsh_envstring(t: &[u8]) -> bool {
-	let mut end = if t.first().is_some_and(u8::is_ascii_digit) {
-		t.iter().take_while(|c| c.is_ascii_digit()).count()
-	} else {
-		// The lexer already decided this word is an assignment.
-		let mut e = syn::zsh::ident_end(t, 0, true);
-		if e < t.len() {
-			syn::zsh::skipparens(syn::zsh::tok::INBRACK, syn::zsh::tok::OUTBRACK, t, &mut e);
-		}
-		e
-	};
-	if t.get(end) == Some(&b'+') {
-		end += 1;
-	}
-	t.get(end) == Some(&b'=')
 }
 
 /// Whether a word starts like an assignment (`name=`, `name+=`,
@@ -1950,9 +1746,7 @@ pub fn ansi_c_with(raw: &[u8], code_point: &mut dyn FnMut(u32, &mut Vec<u8>)) ->
 
 #[cfg(test)]
 mod tests {
-	use super::{
-		ansi_c, assignment_like, function_from_source_at, lower, lower_deferred, materialize,
-	};
+	use super::{ansi_c, assignment_like, lower, lower_deferred, materialize};
 	use crate::bash::{ids::ModeId, syntax as syn};
 
 	#[test]
@@ -1985,24 +1779,6 @@ mod tests {
 			assert_eq!(compiled.source, eager.funcs[0].body.source);
 			assert_eq!(compiled.root, eager.funcs[0].body.root);
 		}
-	}
-
-	#[test]
-	fn autoload_defers_nested_functions_and_keeps_file_lines() {
-		let src = b"loaded () {\nhelper () { echo nested; }\necho ready\n}\n";
-		let function = function_from_source_at(src, ModeId::Zsh, syn::Features::ZSH, 0).unwrap();
-		assert!(function.body.ops.is_empty());
-		let bytes = postcard::to_stdvec(&function.body).unwrap();
-		let saved = postcard::from_bytes(&bytes).unwrap();
-		let compiled = materialize(&saved, false).unwrap();
-		assert_eq!(compiled.id, function.body.id);
-		assert_eq!(compiled.funcs.len(), 1);
-		let helper = &compiled.funcs[0];
-		assert_eq!(helper.name, "helper");
-		assert!(helper.body.ops.is_empty());
-		assert!(helper.body.deferred.is_some());
-		let helper_body = materialize(&helper.body, false).unwrap();
-		assert!(helper_body.nodes.iter().any(|n| n.line == 1));
 	}
 
 	// Goldens: bash 5.3 `printf '%q' $'…'` and upstream nquote3/nquote4.

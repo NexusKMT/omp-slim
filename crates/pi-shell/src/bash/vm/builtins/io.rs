@@ -874,8 +874,7 @@ pub fn select_next(
 	if items.is_empty() {
 		return Ok(None);
 	}
-	let (var, items, mut print_menu, mut more) = (var.clone(), items.clone(), *first, *more);
-	let zsh = vp.mode.dialect() == crate::bash::ids::Dialect::Zsh;
+	let (var, items, mut print_menu, more) = (var.clone(), items.clone(), *first, *more);
 	let mut sc = vp
 		.frames
 		.last_mut()
@@ -885,27 +884,16 @@ pub fn select_next(
 	let result = loop {
 		let p =
 			Probe::Input { fd: 0, delim: Some(b'\n'), lines: 1, nchars: None, part, timeout_ns: None };
-		// zsh pages the menu: each page moves `more` on, so a replayed
-		// part computes it again.
-		let zsh_menu = if zsh && print_menu {
-			let columns = terminal_size(k, cx, vp, b"COLUMNS", 80);
-			let lines = terminal_size(k, cx, vp, b"LINES", 24);
-			let (text, next) = zsh_select_list(&items, more, columns, lines);
-			more = next;
-			Some(text)
-		} else {
-			None
-		};
 		let answer = if let Some(r) = probe::cached(&sc, &p) {
 			r.clone()
 		} else {
 			if sc.probing() != Some(&p) {
-				let mut text = zsh_menu.unwrap_or_default();
-				if print_menu && !zsh {
+				let mut text = Vec::new();
+				if print_menu {
 					let columns = terminal_size(k, cx, vp, b"COLUMNS", 80);
 					text.extend_from_slice(&select_menu(&items, columns));
 				}
-				let ps3 = if zsh { "?# " } else { "#? " };
+				let ps3 = "#? ";
 				text.extend_from_slice(&scalar_of(k, cx, vp, b"PS3").unwrap_or_else(|| ps3.into()));
 				vp.out
 					.push_back(PendingWrite { fd: 2, bytes: text.into(), off: 0 });
@@ -924,15 +912,6 @@ pub fn select_next(
 			break None;
 		};
 		if eof && data.is_empty() {
-			if zsh {
-				// zsh `execselect`: `REPLY` empty, a newline on stderr; the
-				// loop's status is its last command's.
-				let reply = Some(Var::scalar(BString::default(), crate::bash::store::Attrs::NONE));
-				state::store_var(&mut k.root, cx.store, vp, b"REPLY", reply, Level::Dynamic);
-				vp.out
-					.push_back(PendingWrite { fd: 2, bytes: BString::from("\n"), off: 0 });
-				break None;
-			}
 			vp.out
 				.push_back(PendingWrite { fd: 1, bytes: BString::from("\n"), off: 0 });
 			if let Some(rec) = vp.frames.last_mut().and_then(|f| f.loops.last_mut()) {
@@ -957,15 +936,7 @@ pub fn select_next(
 			part += 1;
 			continue;
 		}
-		let choice = if zsh {
-			// zsh `atoi`: the leading digits.
-			let digits = reply.iter().take_while(|c| c.is_ascii_digit()).count();
-			std::str::from_utf8(&reply[..digits])
-				.ok()
-				.and_then(|s| s.parse::<usize>().ok())
-		} else {
-			number(&reply).and_then(|n| usize::try_from(n).ok())
-		};
+		let choice = number(&reply).and_then(|n| usize::try_from(n).ok());
 		let choice = choice.filter(|&n| n >= 1 && n <= items.len());
 		break Some((var, choice.map_or_else(BString::default, |n| items[n - 1].clone())));
 	};
@@ -976,50 +947,6 @@ pub fn select_next(
 		*m = more;
 	}
 	Ok(result)
-}
-
-/// zsh `selectlist`: the menu page starting at row `start`, in columns
-/// over `columns - 1` and at most `lines - 2` rows; the row the next page
-/// starts at (0 once the menu is complete).
-fn zsh_select_list(items: &[BString], start: u32, columns: usize, lines: usize) -> (Vec<u8>, u32) {
-	let ct = items.len();
-	let mut longest = items.iter().map(|i| i.len()).max().unwrap_or(0).max(1) + 1;
-	let mut t0 = ct;
-	while t0 > 0 {
-		t0 /= 10;
-		longest += 1;
-	}
-	let width = columns.saturating_sub(1);
-	let fct = (width / (longest + 3)).max(1);
-	let fw = if width / (longest + 3) == 0 {
-		0
-	} else {
-		width / fct
-	};
-	let colsz = ct.div_ceil(fct);
-	let start = start as usize;
-	let mut out = Vec::new();
-	let mut t1 = start;
-	while t1 != colsz && t1 - start < lines.saturating_sub(2) {
-		let mut ap = t1;
-		loop {
-			let n = ap + 1;
-			let before = out.len();
-			out.extend_from_slice(n.to_string().as_bytes());
-			out.extend_from_slice(b") ");
-			out.extend_from_slice(&items[ap]);
-			let shown = out.len() - before;
-			out.resize(before + shown.max(fw), b' ');
-			ap += colsz;
-			if ap >= ct {
-				break;
-			}
-		}
-		out.push(b'\n');
-		t1 += 1;
-	}
-	let more = if t1 < colsz { t1 } else { 0 };
-	(out, u32::try_from(more).unwrap_or(0))
 }
 
 #[cfg(test)]

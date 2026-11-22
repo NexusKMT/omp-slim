@@ -15,9 +15,8 @@ use std::borrow::Cow;
 use bstr::{BStr, BString};
 
 use crate::bash::{
-	ids::{Dialect, ModeId},
+	ids::ModeId,
 	store::{OptId, OptKind},
-	zshopt::ZshOpt,
 };
 
 /// bash 5.3's GNU long options in its `long_args` order (the usage message
@@ -125,13 +124,9 @@ pub struct ShellArgs {
 	pub help:         bool,
 	/// `--version`: print the version and exit.
 	pub version:      bool,
-	/// The mode the shell starts in: from `argv[0]`'s base name (`zsh`,
-	/// `ksh`; `sh` is bash's posix mode) or a leading `--emulate MODE` /
-	/// `--emulate=MODE`.
+	/// The mode the shell starts in: `sh` for an `sh` invocation (bash's
+	/// posix mode), `bash` otherwise.
 	pub mode:         ModeId,
-	/// zsh dialect: the options the command line set (zsh `parseopts`), in
-	/// order, after the emulation's defaults.
-	pub zsh_options:  Vec<(ZshOpt, bool)>,
 }
 
 /// An invocation bash rejects (it exits with status 2).
@@ -179,26 +174,15 @@ pub enum InvocationError {
 		/// What.
 		what: Cow<'static, str>,
 	},
-	/// A zsh command line zsh rejects (`no such option: X`, `bad option:
-	/// -X`, `string expected after -o`, …); zsh exits with status 1.
-	#[error("{msg}")]
-	Zsh {
-		/// zsh's message.
-		msg: String,
-	},
 }
 
 impl InvocationError {
 	/// bash's exit status for an invocation error (`EX_BADUSAGE`).
 	pub const STATUS: i32 = 2;
 
-	/// The exit status for this error: bash's 2, zsh's 1.
+	/// The exit status for this error (bash's 2).
 	pub const fn status(&self) -> i32 {
-		if matches!(self, Self::Zsh { .. }) {
-			1
-		} else {
-			Self::STATUS
-		}
+		Self::STATUS
 	}
 
 	/// The complete stderr text: `NAME: message`, plus the usage after an
@@ -213,31 +197,6 @@ impl InvocationError {
 			out.extend_from_slice(&usage(shell_name));
 		}
 		out
-	}
-}
-
-/// The mode `--emulate NAME` starts: zsh's `emulate` picks by first letter
-/// (`r`-prefixed names skip it; `c`sh, `k`sh, `s`h and `b`ash (its sh
-/// emulation), anything else zsh). obash adds `bash` itself when the shell
-/// is not started as zsh (`zsh` is false).
-const fn emulated_mode(name: &[u8], zsh: bool) -> ModeId {
-	if !zsh {
-		match name {
-			b"bash" => return ModeId::Bash,
-			b"sh" => return ModeId::Sh,
-			_ => {},
-		}
-	}
-	let c = match name {
-		[b'r', c, ..] => *c,
-		[c, ..] => *c,
-		[] => 0,
-	};
-	match c {
-		b'c' => ModeId::ZshCsh,
-		b'k' => ModeId::Ksh,
-		b's' | b'b' => ModeId::ZshSh,
-		_ => ModeId::Zsh,
 	}
 }
 
@@ -275,56 +234,19 @@ impl ShellArgs {
 		Self::parse_exe(argv, b"")
 	}
 
-	/// [`Self::parse`] for the executable at `exe`: when its base name is
-	/// `zsh`, the shell is zsh whatever `argv[0]` says (`exec -a NAME zsh`),
-	/// emulating by the first letter of `NAME` (zsh `emulate(zsh_name)`).
+	/// [`Self::parse`] given the shell's executable path as well as `argv`
+	/// (bash's option grammar depends only on `argv`).
 	///
 	/// # Errors
 	///
 	/// As [`Self::parse`].
-	pub fn parse_exe(argv: &[BString], exe: &[u8]) -> Result<Self, InvocationError> {
+	pub fn parse_exe(argv: &[BString], _exe: &[u8]) -> Result<Self, InvocationError> {
 		let argv0 = argv
 			.first()
 			.cloned()
 			.unwrap_or_else(|| BString::from("bash"));
 		let base = base_name(&argv0);
 		let base = base.strip_prefix(b"-").unwrap_or(base);
-		// zsh's `--emulate MODE` must come first (zsh `parseopts`);
-		// `--emulate=MODE` is obash's spelling of it.
-		let emulate = match argv.get(1).map(|a| a.as_slice()) {
-			Some(b"--emulate") => Some((
-				argv
-					.get(2)
-					.ok_or_else(|| InvocationError::Zsh { msg: "--emulate: argument required".into() })?
-					.as_slice(),
-				3,
-			)),
-			Some(a) => a.strip_prefix(b"--emulate=").map(|m| (m, 2)),
-			None => None,
-		};
-		let name_mode = match base {
-			b"zsh" => Some(ModeId::Zsh),
-			b"ksh" => Some(ModeId::Ksh),
-			_ if base_name(exe) == b"zsh" => Some(emulated_mode(base, true)),
-			_ => None,
-		};
-		let (mode, first) = match emulate {
-			Some((name, first)) => (emulated_mode(name, name_mode.is_some()), first),
-			None => (name_mode.unwrap_or(ModeId::Bash), 1),
-		};
-		if mode.dialect() == Dialect::Zsh {
-			return Self::parse_zsh(argv, argv0, mode, first);
-		}
-		if first > 1 {
-			let mut rest = vec![argv0];
-			rest.extend_from_slice(&argv[first..]);
-			let mut a = Self::parse(&rest)?;
-			if mode == ModeId::Sh {
-				a.sh = true;
-				a.mode = ModeId::Sh;
-			}
-			return Ok(a);
-		}
 		let mut a = Self {
 			shell_name:   argv0.clone(),
 			dollar0:      argv0.clone(),
@@ -351,7 +273,6 @@ impl ShellArgs {
 			} else {
 				ModeId::Bash
 			},
-			zsh_options:  Vec::new(),
 		};
 		if base == b"rbash" {
 			return Err(InvocationError::Unsupported { what: Cow::Borrowed("restricted mode") });
@@ -490,155 +411,6 @@ impl ShellArgs {
 		Ok(a)
 	}
 
-	/// zsh 5.9 `parseargs`/`parseopts` for a shell starting in zsh-dialect
-	/// `mode`; `argv[first..]` are the arguments after `--emulate`.
-	fn parse_zsh(
-		argv: &[BString],
-		argv0: BString,
-		mode: ModeId,
-		first: usize,
-	) -> Result<Self, InvocationError> {
-		let zerr = |msg: String| InvocationError::Zsh { msg };
-		let mut a = Self {
-			shell_name: argv0.clone(),
-			dollar0: argv0.clone(),
-			named: false,
-			input: Input::Stdin,
-			args: Vec::new(),
-			interactive: false,
-			login_flag: false,
-			login_name: argv0.first() == Some(&b'-'),
-			sh: false,
-			posix: false,
-			options: Vec::new(),
-			shopts: Vec::new(),
-			listing: None,
-			rcfile: None,
-			norc: false,
-			noprofile: false,
-			pretty_print: false,
-			debugger: false,
-			help: false,
-			version: false,
-			mode,
-			zsh_options: Vec::new(),
-		};
-		let mut i = first;
-		let mut command = false;
-		let mut stdin = false;
-		'args: while let Some(arg) = argv.get(i) {
-			let Some(&sign @ (b'-' | b'+')) = arg.first() else {
-				break;
-			};
-			let on = sign == b'-';
-			if arg.len() == 1 || arg.as_slice() == b"--" {
-				i += 1;
-				break;
-			}
-			if let Some(long) = arg.strip_prefix(b"--") {
-				match long {
-					b"version" => {
-						a.version = true;
-						return Ok(a);
-					},
-					b"help" => {
-						a.help = true;
-						return Ok(a);
-					},
-					b"emulate" => {
-						return Err(zerr("--emulate: must precede other options".into()));
-					},
-					_ => {
-						let name: Vec<u8> = long
-							.iter()
-							.map(|&ch| if ch == b'-' { b'_' } else { ch })
-							.collect();
-						let (opt, inv) = ZshOpt::lookup(&name).ok_or_else(|| {
-							zerr(format!("no such option: {}", String::from_utf8_lossy(&name)))
-						})?;
-						a.zsh_options.push((opt, on != inv));
-						i += 1;
-						continue;
-					},
-				}
-			}
-			let mut next = i + 1;
-			let mut at = 1;
-			while at < arg.len() {
-				let ch = arg[at];
-				match ch {
-					b'b' => {
-						i = next;
-						break 'args;
-					},
-					b'c' => command = true,
-					// The rest of the argument, or the next one, names the
-					// option; nothing after it in this argument is read.
-					b'o' => {
-						let name = if at + 1 < arg.len() {
-							arg[at + 1..].to_vec()
-						} else {
-							let next_arg = argv
-								.get(next)
-								.ok_or_else(|| zerr("string expected after -o".into()))?
-								.to_vec();
-							next += 1;
-							next_arg
-						};
-						let (opt, inv) = ZshOpt::lookup(&name).ok_or_else(|| {
-							zerr(format!("no such option: {}", String::from_utf8_lossy(&name)))
-						})?;
-						a.zsh_options.push((opt, on != inv));
-						break;
-					},
-					ch if ch.is_ascii_whitespace() => {
-						if !arg[at..].iter().all(u8::is_ascii_whitespace) {
-							return Err(zerr(format!(
-								"bad option string: '{}'",
-								String::from_utf8_lossy(arg)
-							)));
-						}
-						break;
-					},
-					_ => {
-						let (opt, inv) = ZshOpt::letter(ch, mode)
-							.ok_or_else(|| zerr(format!("bad option: -{}", char::from(ch))))?;
-						let value = on != inv;
-						match opt {
-							ZshOpt::Interactive => a.interactive = value,
-							ZshOpt::Login => a.login_flag = value,
-							ZshOpt::Shinstdin => stdin = value,
-							_ => {},
-						}
-						a.zsh_options.push((opt, value));
-					},
-				}
-				at += 1;
-			}
-			i = next;
-		}
-		let rest = &argv[i.min(argv.len())..];
-		if command {
-			let (cmd, rest) = rest
-				.split_first()
-				.ok_or_else(|| zerr("string expected after -c".into()))?;
-			a.input = Input::Command(cmd.clone());
-			if let Some((name, args)) = rest.split_first() {
-				a.dollar0 = name.clone();
-				a.named = true;
-				a.args = args.to_vec();
-			}
-		} else if !stdin && let Some((script, args)) = rest.split_first() {
-			a.input = Input::Script(script.clone());
-			a.dollar0 = script.clone();
-			a.named = true;
-			a.args = args.to_vec();
-		} else {
-			a.args = rest.to_vec();
-		}
-		Ok(a)
-	}
-
 	/// Whether the shell is interactive: `-i`, or no `-c`, no script and
 	/// both stdin and stderr on a terminal (`ttys`).
 	pub const fn is_interactive(&self, ttys: bool) -> bool {
@@ -683,10 +455,6 @@ impl ShellArgs {
 		interactive: bool,
 	) -> Vec<(OptId, bool)> {
 		let mut opts: Vec<(OptId, bool)> = Vec::new();
-		// A zsh-dialect shell's options are [`Self::zsh_options`].
-		if self.mode.dialect() == Dialect::Zsh {
-			return opts;
-		}
 		if self.posix_at_start(env) || self.sh {
 			opts.push((OptId::Posix, true));
 		}
@@ -735,9 +503,9 @@ impl ShellArgs {
 	}
 
 	/// [`Self::startup_files`], leaving out an interactive shell's rc files
-	/// (`~/.bashrc` or `--rcfile`, `$ENV`; `/etc/zshrc`, `.zshrc`) unless
-	/// `rc`: a [`crate::bash::Profile::Tool`] shell's nested `bash -i` or
-	/// `zsh -i` does not set up the user's completion and history.
+	/// (`~/.bashrc` or `--rcfile`, `$ENV`) unless `rc`: a
+	/// [`crate::bash::Profile::Tool`] shell's nested `bash -i` does not set up
+	/// the user's completion and history.
 	///
 	/// # Errors
 	///
@@ -749,9 +517,6 @@ impl ShellArgs {
 		interactive: bool,
 		rc: bool,
 	) -> Result<Vec<Vec<BString>>, InvocationError> {
-		if self.mode.dialect() == Dialect::Zsh {
-			return Ok(self.zsh_startup_files(env, home, interactive, rc));
-		}
 		let posix = self.posix_at_start(env);
 		let privileged = self
 			.options
@@ -815,63 +580,6 @@ impl ShellArgs {
 			env_file(b"ENV", &mut files)?;
 		}
 		Ok(files)
-	}
-
-	/// zsh 5.9 `run_init_scripts` (non-`sh`/`ksh` emulation): `/etc/zshenv`,
-	/// then under `rcs` `$ZDOTDIR/.zshenv`, the login and interactive files,
-	/// the global ones only under `globalrcs`. `-f` turns `rcs` off.
-	fn zsh_startup_files(
-		&self,
-		env: &[(BString, BString)],
-		home: &[u8],
-		interactive: bool,
-		rc: bool,
-	) -> Vec<Vec<BString>> {
-		let set = |opt: ZshOpt, default: bool| {
-			self
-				.zsh_options
-				.iter()
-				.rev()
-				.find(|(o, _)| *o == opt)
-				.map_or(default, |(_, on)| *on)
-		};
-		let mut files = Vec::new();
-		if self.mode != ModeId::Zsh {
-			// zsh sources `/etc/profile` and `$ENV`-style files only in its sh
-			// and ksh emulations with `-l`; the engine leaves them out.
-			return files;
-		}
-		let rcs = set(ZshOpt::Rcs, true);
-		let global = set(ZshOpt::Globalrcs, true);
-		let login = self.login_flag || self.login_name;
-		let dot = env
-			.iter()
-			.find(|(n, _)| n.as_slice() == b"ZDOTDIR")
-			.map_or_else(|| BString::from(home), |(_, v)| v.clone());
-		let user = |name: &str| {
-			let mut p = dot.clone();
-			p.push(b'/');
-			p.extend_from_slice(name.as_bytes());
-			vec![p]
-		};
-		files.push(vec![BString::from("/etc/zshenv")]);
-		if !rcs {
-			return files;
-		}
-		files.push(user(".zshenv"));
-		for (when, sys, own) in [
-			(login, "/etc/zprofile", ".zprofile"),
-			(interactive && rc, "/etc/zshrc", ".zshrc"),
-			(login, "/etc/zlogin", ".zlogin"),
-		] {
-			if when {
-				if global {
-					files.push(vec![BString::from(sys)]);
-				}
-				files.push(user(own));
-			}
-		}
-		files
 	}
 
 	/// The text of `bash -o` / `bash -O` as the last argument: the options
@@ -1163,18 +871,6 @@ mod tests {
 			(OptId::Noglob, true),
 			(OptId::Checkhash, true),
 		]);
-	}
-
-	#[test]
-	fn zsh_executable_stays_zsh_under_another_argv0() {
-		let a = ShellArgs::parse_exe(&argv(&["foo*", "-fc", ":"]), b"/x/Src/zsh").unwrap();
-		assert_eq!((a.mode, a.dollar0.as_slice()), (ModeId::Zsh, &b"foo*"[..]));
-		let a = ShellArgs::parse_exe(&argv(&["", "-fc", ":"]), b"/x/zsh").unwrap();
-		assert_eq!(a.mode, ModeId::Zsh);
-		let a = ShellArgs::parse_exe(&argv(&["sh", "-c", ":"]), b"/x/zsh").unwrap();
-		assert_eq!(a.mode, ModeId::ZshSh);
-		let a = ShellArgs::parse_exe(&argv(&["foo", "-c", ":"]), b"/x/obash").unwrap();
-		assert_eq!(a.mode, ModeId::Bash);
 	}
 
 	#[test]

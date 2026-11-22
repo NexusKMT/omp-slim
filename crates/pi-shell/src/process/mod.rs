@@ -1,15 +1,14 @@
 //! `pi_shell::process`: the engine as a process shell.
 //!
-//! [`main`] takes a shell's command line (`zsh [zsh options] …`,
-//! `bash [GNU long option] [option] …`, `sh …`; `argv[0]`'s base name picks
-//! the dialect) to its exit status, the way the real shell does: bash's or
-//! zsh's option parsing and messages, `--help`/`--version`, the startup
-//! files, a `-c` command, a script operand or a script read from stdin a
-//! line at a time, run over this process's own terminal, signals and
-//! descriptors by [`NativeHost`].
+//! [`main`] takes a shell's command line (`bash [GNU long option] [option]
+//! …`, `sh …`; `argv[0]`'s base name picks posix mode) to its exit status,
+//! the way bash does: bash's option parsing and messages,
+//! `--help`/`--version`, the startup files, a `-c` command, a script operand
+//! or a script read from stdin a line at a time, run over this process's own
+//! terminal, signals and descriptors by [`NativeHost`].
 //!
 //! Two callers: the `obash` binary (a standalone process; it adds its test
-//! modes on top of the pieces here) and `omp zsh|bash|sh`, which runs the
+//! modes on top of the pieces here) and `omp bash|sh`, which runs the
 //! shell inside Bun through pi-natives' `runShellMain`
 //! ([`ProcessOptions::embedded`]). Embedded, the shell shares its process
 //! with a runtime that owns signal handlers and descriptors: see
@@ -36,12 +35,11 @@ pub use self::host::{NativeHost, ignored_on_entry, inherited_fds};
 use self::signals::RuntimeSignals;
 use crate::{
 	bash::{
-		Budget, CallOutcome, Cx, Dialect, Engine, EngineConfig, EventMask, MemStore, ModeId, Origin,
-		Profile, RunId, Script, Shell, ShellInit, Step, Vpid,
+		Budget, CallOutcome, Cx, Engine, EngineConfig, EventMask, MemStore, Origin, Profile, RunId,
+		Script, Shell, ShellInit, Step, Vpid,
 		diag::strerror,
 		invocation::{self, ShellArgs},
 		store::OptId,
-		zshopt::ZshOpt,
 	},
 	sys::Parker,
 };
@@ -50,7 +48,8 @@ use crate::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProcessOptions {
 	/// The shell runs inside another runtime's process (Bun, for
-	/// `omp zsh`), which keeps running or exits after [`main`] returns:
+	/// `omp bash`/`omp sh`), which keeps running or exits after [`main`]
+	/// returns:
 	///
 	/// - signals: of HUP, INT, QUIT, TERM, PIPE, ALRM, TSTP, TTIN, TTOU, CHLD,
 	///   WINCH and CONT, those the runtime caught with a handler (and `SIGPIPE`,
@@ -123,10 +122,10 @@ fn search_path(env: &[(BString, BString)]) -> BString {
 
 /// Read the script operand as bash's `open_shell_script` does.
 ///
-/// zsh's `setupshin` for the zsh dialect ([`read_zsh_script`]): a name without
-/// `/` that is not in the current directory is looked up in `PATH` (bash's
-/// default when unset); a directory or a binary file (a NUL on the first
-/// line of the first 80 bytes) is refused (126); a missing file is 127.
+/// A name without `/` that is not in the current directory is looked up in
+/// `PATH` (bash's default when unset); a directory or a binary file (a NUL on
+/// the first line of the first 80 bytes) is refused (126); a missing file is
+/// 127.
 /// Errors before the file opens are prefixed with the shell's name, later
 /// ones with the script's (`$0`). Returns the path opened and the text.
 ///
@@ -138,9 +137,6 @@ pub fn read_script(
 	script: &[u8],
 	env: &[(BString, BString)],
 ) -> Result<(BString, Vec<u8>), ScriptError> {
-	if args.mode.dialect() == Dialect::Zsh {
-		return read_zsh_script(args, script, env);
-	}
 	let mut path = BString::from(script);
 	let mut opened = fs::File::open(os_path(&path));
 	if let Err(err) = &opened
@@ -184,51 +180,6 @@ pub fn read_script(
 		return Err(ScriptError::new(dollar0, &path, "cannot execute binary file", 126));
 	}
 	Ok((path, text))
-}
-
-/// zsh 5.9 `setupshin`: the script operand as given (not a directory).
-///
-/// Failing that, under `pathscript` (on in the sh and ksh emulations) a
-/// name without `/` is looked up in `PATH` (`pathprog`). Anything else is
-/// zsh's `NAME: can't open input file: SCRIPT`, status 127.
-///
-/// # Errors
-///
-/// zsh's message and status when the script cannot be read.
-pub fn read_zsh_script(
-	args: &ShellArgs,
-	script: &[u8],
-	env: &[(BString, BString)],
-) -> Result<(BString, Vec<u8>), ScriptError> {
-	let usable = |p: &[u8]| fs::metadata(os_path(p)).is_ok_and(|m| !m.is_dir());
-	let pathscript = args
-		.zsh_options
-		.iter()
-		.rev()
-		.find(|(opt, _)| *opt == ZshOpt::Pathscript)
-		.map_or(args.mode != ModeId::Zsh, |&(_, on)| on);
-	let path = if usable(script) {
-		Some(BString::from(script))
-	} else if pathscript && !script.contains(&b'/') {
-		search_path(env).split(|&c| c == b':').find_map(|dir| {
-			let mut cand = BString::from(dir);
-			cand.push(b'/');
-			cand.extend_from_slice(script);
-			usable(&cand).then_some(cand)
-		})
-	} else {
-		None
-	};
-	if let Some(path) = path
-		&& let Ok(text) = fs::read(os_path(&path))
-	{
-		return Ok((path, text));
-	}
-	let mut text = args.shell_name.to_vec();
-	text.extend_from_slice(b": can't open input file: ");
-	text.extend_from_slice(script);
-	text.push(b'\n');
-	Err(ScriptError { text, status: 127 })
 }
 
 /// What the command line `args` runs: the `-c` command, the script operand
@@ -317,9 +268,7 @@ pub enum Start {
 /// their status), as is bash's `-o`/`+O` listing without a command; then the
 /// environment is taken and the input read ([`input`]; `whole_stdin` as there).
 pub fn start(argv: &[BString], whole_stdin: bool) -> Start {
-	// The executable's own name keeps zsh zsh under another `argv[0]`.
-	let exe = std::env::current_exe().map_or_default(|p| p.into_os_string().into_encoded_bytes());
-	let args = match ShellArgs::parse_exe(argv, &exe) {
+	let args = match ShellArgs::parse_exe(argv, b"") {
 		Ok(args) => args,
 		Err(err) => {
 			let name = argv
@@ -330,21 +279,12 @@ pub fn start(argv: &[BString], whole_stdin: bool) -> Start {
 			return Start::Exit(err.status());
 		},
 	};
-	let zsh = args.mode.dialect() == Dialect::Zsh;
 	if args.help {
-		let text = if zsh {
-			zsh_help_text(argv.first().map_or(&b"zsh"[..], |a| a.as_slice()), &args)
-		} else {
-			invocation::help_text(&args.shell_name)
-		};
+		let text = invocation::help_text(&args.shell_name);
 		return Start::Exit(i32::from(print_out(&text)));
 	}
 	if args.version {
-		let text = if zsh {
-			zsh_version_text()
-		} else {
-			invocation::version_text()
-		};
+		let text = invocation::version_text();
 		return Start::Exit(i32::from(print_out(&text)));
 	}
 	// bash lists the options and goes on: a failed write does not stop it.
@@ -359,47 +299,6 @@ pub fn start(argv: &[BString], whole_stdin: bool) -> Start {
 			Start::Exit(i32::from(err.status))
 		},
 	}
-}
-
-/// zsh 5.9 `printhelp`: the usage with `argv[0]` as given, then the option
-/// list. Its shape depends only on whether the options before `--help` set
-/// `SHOPTIONLETTERS` (the emulation's defaults apply after the parse): set,
-/// the `-b` line goes and the sh option letters are listed. The list is
-/// zsh's own output, kept verbatim (including its off-by-one `Option
-/// aliases` equivalents).
-fn zsh_help_text(argzero: &[u8], args: &ShellArgs) -> Vec<u8> {
-	let sh_letters = args
-		.zsh_options
-		.iter()
-		.rev()
-		.find(|(opt, _)| *opt == ZshOpt::Shoptionletters)
-		.is_some_and(|&(_, on)| on);
-	let body: &[u8] = if sh_letters {
-		include_bytes!("zsh_help_sh.txt")
-	} else {
-		include_bytes!("zsh_help.txt")
-	};
-	let mut out = b"Usage: ".to_vec();
-	out.extend_from_slice(argzero);
-	out.extend_from_slice(b" [<options>] [<argument> ...]\n");
-	out.extend_from_slice(body);
-	out
-}
-
-/// zsh 5.9 `--version`: `zsh 5.9 (MACHTYPE-VENDOR-OSTYPE)` as configure
-/// names the build host (`arm64-apple-darwinN.0`, `x86_64-pc-linux-gnu`).
-fn zsh_version_text() -> Vec<u8> {
-	let arch = std::env::consts::ARCH;
-	let vendor = if arch == "x86_64" { "pc" } else { "unknown" };
-	let host = if cfg!(target_os = "macos") {
-		let release = crate::sys::uname::uname().map_or_default(|(_, release, _)| release);
-		let major = release.split(|&c| c == b'.').next().unwrap_or_default();
-		let cpu = if arch == "aarch64" { "arm64" } else { arch };
-		format!("{cpu}-apple-darwin{}.0", String::from_utf8_lossy(major))
-	} else {
-		format!("{arch}-{vendor}-linux-gnu")
-	};
-	format!("zsh 5.9 ({host})\n").into_bytes()
 }
 
 /// The process shell: the command line `argv` (`argv[0]` names the shell)
@@ -478,7 +377,7 @@ fn run(args: &ShellArgs, env: Vec<(BString, BString)>, input: Input, opts: Proce
 	shell.set_event_mask(EventMask::NONE);
 	let run = shell.submit(Script { origin, ..Script::command(source) });
 	let status = drive(&mut host, &mut store, &mut shell, run, root);
-	// zsh `zexit`: hang up running jobs, give the terminal back.
+	// Hang up running jobs and give the terminal back.
 	shell.leave_job_control(&mut Cx { host: &mut host, store: &mut store });
 	// Standalone, the process exits next: let the OS reclaim the engine's
 	// unit cache and the store instead of freeing every cached unit,
@@ -528,12 +427,7 @@ pub fn shell_init(
 	};
 	let mut startup = Vec::new();
 	match args.startup_files(&env, &home, interactive) {
-		Ok(mut files) => {
-			let newuser = newuser_scripts(args, &env, interactive);
-			if !newuser.is_empty() {
-				// After `/etc/zshenv`, before `$ZDOTDIR/.zshenv`.
-				files.insert(files.len().min(1), newuser);
-			}
+		Ok(files) => {
 			for candidates in files {
 				let Some(path) = candidates
 					.into_iter()
@@ -568,21 +462,10 @@ pub fn shell_init(
 			},
 		}
 	}
-	// A zsh-dialect shell takes zsh option names (the bash ones above stay
-	// empty for it).
 	let options = options
 		.into_iter()
 		.map(|(opt, on)| (BString::from(<&'static str>::from(opt)), on))
-		.chain(
-			args
-				.zsh_options
-				.iter()
-				.map(|&(opt, on)| (BString::from(<&'static str>::from(opt)), on)),
-		)
 		.collect();
-	let zsh_fpath = (args.mode.dialect() == Dialect::Zsh)
-		.then(system_fpath)
-		.flatten();
 	ShellInit {
 		mode: args.mode,
 		argv0,
@@ -593,136 +476,7 @@ pub fn shell_init(
 		options,
 		shell_pid: std::process::id(),
 		startup,
-		zsh_params: zsh_params(args),
-		zsh_fpath,
 		profile: Profile::User,
-	}
-}
-
-/// The system zsh's function directories (`fpath` before any startup file):
-/// the site and vendor directories, then each directory of the function
-/// library that holds functions. Distributions install the library at
-/// different places: flat under `/usr/share/zsh/5.9/functions` (zsh's own
-/// layout, macOS, Fedora) or grouped under `/usr/share/zsh/functions`
-/// (Debian, Ubuntu, Arch). `None` without one: zsh's compiled-in default.
-fn system_fpath() -> Option<Vec<BString>> {
-	use std::path::Path;
-	const SITE: [&str; 4] = [
-		"/usr/local/share/zsh/site-functions",
-		"/usr/share/zsh/site-functions",
-		"/usr/share/zsh/vendor-functions",
-		"/usr/share/zsh/vendor-completions",
-	];
-	const LIBRARIES: [&str; 3] = [
-		"/usr/share/zsh/5.9/functions",
-		"/usr/share/zsh/functions",
-		"/usr/local/share/zsh/5.9/functions",
-	];
-	let libraries: Vec<&str> = LIBRARIES
-		.iter()
-		.copied()
-		.filter(|lib| Path::new(lib).is_dir())
-		.collect();
-	if libraries.is_empty() {
-		return None;
-	}
-	// zsh always lists the local site directory, existing or not.
-	let mut out = vec![BString::from(SITE[0])];
-	out.extend(
-		SITE[1..]
-			.iter()
-			.copied()
-			.filter(|d| Path::new(d).is_dir())
-			.map(BString::from),
-	);
-	for lib in libraries {
-		function_dirs(Path::new(lib), 0, &mut out);
-	}
-	Some(out)
-}
-
-/// Push `dir` when it holds a function (a file other than a compiled
-/// `.zwc` digest), then its subdirectories in name order.
-fn function_dirs(dir: &std::path::Path, depth: u32, out: &mut Vec<BString>) {
-	let Ok(entries) = fs::read_dir(dir) else {
-		return;
-	};
-	let mut subdirs = Vec::new();
-	let mut functions = false;
-	for e in entries.flatten() {
-		let Ok(ft) = e.file_type() else { continue };
-		if ft.is_dir() {
-			subdirs.push(e.path());
-		} else if !e.file_name().as_encoded_bytes().ends_with(b".zwc") {
-			functions = true;
-		}
-	}
-	if functions {
-		out.push(fpath_spelling(dir));
-	}
-	if depth < 3 {
-		subdirs.sort();
-		for d in subdirs {
-			function_dirs(&d, depth + 1, out);
-		}
-	}
-}
-
-/// `dir` as an `fpath` entry: its bytes.
-fn fpath_spelling(dir: &std::path::Path) -> BString {
-	BString::from(dir.as_os_str().as_encoded_bytes())
-}
-
-/// zsh/newuser in zsh's `run_init_scripts`: for an interactive shell in zsh
-/// emulation with `RCS` on and `PRIVILEGED` off (it defaults on in a setuid
-/// or setgid process), the `newuser` scripts to try (the first that exists
-/// is sourced) when the user has no dotfiles in `$ZDOTDIR` (else `$HOME`).
-fn newuser_scripts(
-	args: &ShellArgs,
-	env: &[(BString, BString)],
-	interactive: bool,
-) -> Vec<BString> {
-	if args.mode != ModeId::Zsh || !interactive {
-		return Vec::new();
-	}
-	let set = |opt: ZshOpt, default: bool| {
-		args
-			.zsh_options
-			.iter()
-			.rev()
-			.find(|(o, _)| *o == opt)
-			.map_or(default, |&(_, on)| on)
-	};
-	// SAFETY: the id getters have no preconditions.
-	let setid = unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() };
-	if !set(ZshOpt::Rcs, true) || set(ZshOpt::Privileged, setid) {
-		return Vec::new();
-	}
-	let var = |name: &[u8]| {
-		env.iter()
-			.find(|(n, _)| n.as_slice() == name)
-			.map(|(_, v)| v.as_slice())
-	};
-	crate::bash::newuser_startup_scripts(var(b"ZDOTDIR").or_else(|| var(b"HOME")), |p| {
-		fs::metadata(os_path(p)).is_ok()
-	})
-}
-
-/// zsh's `init.c` parameters from the command line (zsh dialect only):
-/// `ZSH_EXECUTION_STRING` (the `-c` string) and `ZSH_SCRIPT` (the script
-/// operand as given, before any `PATH` search).
-fn zsh_params(args: &ShellArgs) -> Vec<(BString, BString)> {
-	if args.mode.dialect() != Dialect::Zsh {
-		return Vec::new();
-	}
-	match &args.input {
-		invocation::Input::Command(cmd) => {
-			vec![(BString::from("ZSH_EXECUTION_STRING"), BString::from(cmd.to_vec()))]
-		},
-		invocation::Input::Script(script) => {
-			vec![(BString::from("ZSH_SCRIPT"), BString::from(script.to_vec()))]
-		},
-		invocation::Input::Stdin => Vec::new(),
 	}
 }
 

@@ -4,8 +4,6 @@
 mod obash_support;
 
 use std::{fmt::Write as _, fs, path::PathBuf};
-#[cfg(unix)]
-use std::{os::unix::process::CommandExt, time::UNIX_EPOCH};
 
 use pi_shell::testkit::golden;
 
@@ -250,33 +248,4 @@ fn print_flag_prints_declare_f_layout() {
 		String::from_utf8_lossy(&bad.stderr)
 			.contains("-c: line 1: syntax error near unexpected token `fi'")
 	);
-}
-
-/// A stale lock that cannot be unlinked must report its error, not retry
-/// forever.
-#[cfg(unix)]
-#[test]
-fn history_write_reports_an_unremovable_stale_lock() {
-	let dir = tempfile::tempdir().unwrap();
-	let history = dir.path().join("history");
-	let lock = dir.path().join("history.LOCK");
-	fs::create_dir(&lock).unwrap();
-	fs::set_times(&lock, fs::FileTimes::new().set_modified(UNIX_EPOCH)).unwrap();
-	let out = output(
-		obash()
-			.arg0("zsh")
-			.args([
-				"-f",
-				"-i",
-				"-c",
-				"HISTSIZE=10; SAVEHIST=10; print -s -- saved; fc -W \"$1\"; print unexpected",
-				"zsh",
-			])
-			.arg(&history),
-	);
-	let stderr = String::from_utf8_lossy(&out.stderr);
-	assert!(stderr.contains("locking failed"), "{stderr}");
-	assert!(stderr.contains(&*history.to_string_lossy()), "{stderr}");
-	assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
-	assert!(!history.exists(), "failed lock must not overwrite history");
 }

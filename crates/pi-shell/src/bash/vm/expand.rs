@@ -72,27 +72,6 @@ pub enum Stop {
 		/// `strs` index of a `$( )` body's source text.
 		text:  Option<u32>,
 	},
-	/// A zsh command substitution must run first: `text` is its body (zsh
-	/// source, parsed in the vproc's mode when it starts); the op parks,
-	/// then replays.
-	ZshSub {
-		/// The body.
-		text: BString,
-		/// A hook function call zsh makes from an expansion
-		/// (`subst_string_by_func`: `zsh_directory_name`): it runs in the
-		/// current shell, its output not captured; the replay sees its
-		/// status.
-		here: bool,
-	},
-	/// A zsh user math function must run first (zsh `callmathfunc`'s
-	/// `doshfunc`): the op parks while the shell function runs in the
-	/// current shell, then replays with its value (zsh `lastmathval`) and
-	/// status logged.
-	MathCall(Box<MathCall>),
-	/// A zsh expansion needs a file-system answer first (the PATH search of
-	/// `=cmd`): the op performs the probe, logs its answer
-	/// ([`super::exec::probe_atom`]) and replays.
-	Probe(super::proc::Probe),
 	/// `$!` names a background job whose pid is still to be settled
 	/// ([`super::proc::Bang`]): the op blocks on that key, then replays.
 	Wait(WaitKey),
@@ -103,18 +82,6 @@ pub enum Stop {
 	Fatal(Diag),
 	/// The state store failed.
 	Store(StoreError),
-}
-
-/// A call of the shell function behind a zsh math function
-/// ([`Stop::MathCall`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MathCall {
-	/// The shell function (defined, not an autoload stub).
-	pub func:    BString,
-	/// Its `$0`: the math function's name.
-	pub argzero: BString,
-	/// Its positional parameters.
-	pub args:    Vec<BString>,
 }
 
 impl From<StoreError> for Stop {
@@ -500,46 +467,6 @@ impl<'e, 'c> Expander<'e, 'c> {
 		}
 	}
 
-	/// A zsh word ([`Part::Zsh`], its tokenized text) into `sink` through
-	/// zsh's expander: fields (with the words needing filename generation
-	/// recorded for the glob stage), a scalar (also the `=~` side), or a
-	/// pattern (zsh pattern tokens kept). Out of line: the bash word loop
-	/// does not carry it.
-	#[inline(never)]
-	fn zsh_word(&mut self, text: &[u8], kind: WordKind, sink: &mut Sink<'_>) -> X<()> {
-		match sink {
-			Sink::Fields(f) => super::zsh::subst::fields(
-				self,
-				text,
-				kind,
-				f.out,
-				f.globs.as_mut().map(|g| &mut *g.out),
-			),
-			Sink::Scalar(b) | Sink::Regex(b) => {
-				let v = super::zsh::subst::scalar(self, text, kind)?;
-				b.extend_from_slice(&v);
-				Ok(())
-			},
-			Sink::Pattern(b) => {
-				let v = super::zsh::subst::pattern(self, text)?;
-				b.extend_from_slice(&v);
-				Ok(())
-			},
-		}
-	}
-
-	/// A zsh here-document body (raw text, unquoted delimiter) expanded as
-	/// zsh does; the redirection stage of zsh units calls it.
-	pub fn zsh_heredoc(&mut self, raw: &[u8]) -> X<BString> {
-		super::zsh::subst::heredoc(self, raw)
-	}
-
-	/// Evaluate zsh arithmetic text (substituted first): `$(( ))`,
-	/// `(( ))`, `repeat` counts and arithmetic `for` in zsh units.
-	pub fn zsh_arith(&mut self, text: &[u8]) -> X<super::zsh::math::Number> {
-		super::zsh::subst::arith_value(self, text)
-	}
-
 	/// Evaluate arithmetic text (expanded first) once.
 	pub fn arith(&mut self, text: &[u8]) -> X<i64> {
 		let expanded = self.expand_text(text)?;
@@ -822,7 +749,7 @@ impl<'e, 'c> Expander<'e, 'c> {
 					}
 					sink.lit(b")", false);
 				},
-				Part::Zsh(t) => self.zsh_word(t, w.kind, sink)?,
+				Part::Zsh(_) => {},
 				_ => self.part(unit, part, sink, quoted, rhs)?,
 			}
 		}
@@ -995,7 +922,7 @@ impl<'e, 'c> Expander<'e, 'c> {
 				sink.lit(&compound_text(&out), true);
 			},
 			Part::BadSubst(text) => return Err(Stop::Fail(Diag::BadSubst { text: text.clone() })),
-			Part::Zsh(t) => self.zsh_word(t, WordKind::Plain, sink)?,
+			Part::Zsh(_) => {},
 			Part::AnsiC(raw) => {
 				let cs = super::locale::charset(self.k, self.cx.store, self.vp);
 				let s = crate::bash::ir::ansi_c_with(raw, &mut |code, out| {
@@ -1961,12 +1888,7 @@ impl<'e, 'c> Expander<'e, 'c> {
 			.iter()
 			.skip(1)
 			.any(|a| a.first() == Some(&b'-') && a[1..].contains(&b'A'));
-		// zsh's typeset takes a plain list as key/value pairs itself (and
-		// rejects a mixed one).
-		if assoc
-			&& elems.first().is_some_and(|e| e.key.is_none())
-			&& unit.mode.dialect() != crate::bash::ids::Dialect::Zsh
-		{
+		if assoc && elems.first().is_some_and(|e| e.key.is_none()) {
 			self.kvpair(unit, elems, true, out)?;
 		} else {
 			self.compound(unit, elems, out, Some(globs))?;
@@ -3939,11 +3861,8 @@ impl arith::Env for Vars<'_, '_> {
 			},
 			Err(Stop::Fail(d) | Stop::Fatal(d)) => d,
 			Err(Stop::Store(_)) => Diag::StoreFailed,
-			Err(Stop::Sub { .. } | Stop::ZshSub { .. } | Stop::MathCall(_)) => Diag::Unsupported {
+			Err(Stop::Sub { .. }) => Diag::Unsupported {
 				what: "command substitution in a subscript met during arithmetic evaluation".into(),
-			},
-			Err(Stop::Probe(_)) => Diag::Unsupported {
-				what: "`=cmd` in a subscript met during arithmetic evaluation".into(),
 			},
 			Err(Stop::Wait(_)) => unreachable!("an expansion without a replay log never waits"),
 		};
@@ -3970,11 +3889,8 @@ impl arith::Env for Vars<'_, '_> {
 			},
 			Err(Stop::Fail(d) | Stop::Fatal(d)) => d,
 			Err(Stop::Store(_)) => Diag::StoreFailed,
-			Err(Stop::Sub { .. } | Stop::ZshSub { .. } | Stop::MathCall(_)) => Diag::Unsupported {
+			Err(Stop::Sub { .. }) => Diag::Unsupported {
 				what: "command substitution in a subscript met during arithmetic evaluation".into(),
-			},
-			Err(Stop::Probe(_)) => Diag::Unsupported {
-				what: "`=cmd` in a subscript met during arithmetic evaluation".into(),
 			},
 			Err(Stop::Wait(_)) => unreachable!("an expansion without a replay log never waits"),
 		};

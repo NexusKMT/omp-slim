@@ -3,12 +3,12 @@ import { isNativeShell } from "../../src/cli/native-shell";
 import { commands, resolveCliArgv } from "../../src/cli-commands";
 import { generateLiveCompletion } from "../../src/commands/completions";
 
-const SHELLS = ["zsh", "bash", "sh"] as const;
+const SHELLS = ["bash", "sh"] as const;
 
-describe("omp zsh|bash|sh", () => {
-	it("dispatches exactly the three shell words", () => {
+describe("omp bash|sh", () => {
+	it("dispatches exactly the two shell words", () => {
 		for (const shell of SHELLS) expect(isNativeShell(shell)).toBe(true);
-		for (const other of [undefined, "shell", "fish", "-c", "launch"]) expect(isNativeShell(other)).toBe(false);
+		for (const other of [undefined, "zsh", "shell", "fish", "-c", "launch"]) expect(isNativeShell(other)).toBe(false);
 	});
 
 	it("registers each as a command taking arbitrary arguments", async () => {

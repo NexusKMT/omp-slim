@@ -709,11 +709,7 @@ mod native {
 				("body", list(m, ps.body())),
 			]),
 			Part::Compound(e) => V::Obj(vec![("type", s(b"compound")), ("elems", elems(m, e))]),
-			Part::Zsh(raw) => {
-				let mut text = Vec::new();
-				crate::bash::syntax::print::zsh_text(raw, &mut text);
-				V::Obj(vec![("type", s(b"zsh")), ("text", V::Str(text))])
-			},
+			Part::Zsh(raw) => V::Obj(vec![("type", s(b"zsh")), ("text", V::Str(raw.to_vec()))]),
 		}
 	}
 
@@ -2568,9 +2564,7 @@ impl PartScan<'_> {
 			Part::BadComsub(b) => self.i += b.text().len(),
 			Part::DroppedQuote => self.i += 1,
 			Part::Zsh(raw) => {
-				let mut text = Vec::new();
-				crate::bash::syntax::print::zsh_text(raw, &mut text);
-				for &b in &text {
+				for &b in raw {
 					self.skip_cont();
 					if self.at(self.i) == b {
 						self.i += 1;

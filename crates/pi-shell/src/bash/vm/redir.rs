@@ -4,15 +4,6 @@
 //!
 //! Progress (`done`, the expanded target, a pending `open`) lives in the
 //! scratch, so a redirection list that parks resumes where it stopped.
-//!
-//! zsh units take [`zsh_install`]: zsh's `multios` (an fd redirected more
-//! than once in one command writes to all its targets, or reads them in
-//! turn; a pipeline stage's pipe counts), `noclobber` with `clobberempty`
-//! and `appendcreate`, `>&p`/`<&p` coprocess fds, `{var}` checks and zsh's
-//! messages. Ported from zsh 5.9 `exec.c` (`addfd`, `closemn`, `clobber_open`
-//! and `execcmd`'s redirection loop; MIT-style licence, Copyright (c)
-//! 1992-1997 Paul Falstad and the zsh development group).
-
 use std::{
 	sync::Arc,
 	task::{Context, Poll},
@@ -26,23 +17,18 @@ use super::{
 	exec::{Flow, expanding},
 	expand::arith_value,
 	probe::{absolute, dev_fd},
-	proc::{
-		AssignValue, BangStage, DeferPhase, Deferral, FrameKind, Probe, ProbeResult, Saved, Slot,
-		Stage, Vproc,
-	},
+	proc::{AssignValue, BangStage, DeferPhase, Deferral, Saved, Slot, Stage, Vproc},
 	state::{self, Level},
 };
 use crate::bash::{
 	diag::Diag,
 	event::{EventData, RedirInfo, RedirKind, WaitKey},
 	fd::{FdOrigin, FdRef},
-	fs::{File, FileKind, FsOp, FsPoll, OpenFlags, SeekFrom, StatKind},
-	host::{ChildRedir, OsHandle},
-	ids::Dialect,
-	ir::{RedirFdIr, RedirIr, RedirTargetIr, SpawnKind, Unit},
+	fs::{FsOp, FsPoll, OpenFlags, StatKind},
+	host::ChildRedir,
+	ir::{RedirFdIr, RedirIr, RedirTargetIr, Unit},
 	mem::MemBuf,
 	store::{OptId, VarValue},
-	zshopt::ZshOpt,
 };
 
 /// Why a redirection list stopped.
@@ -74,47 +60,13 @@ pub fn apply(
 	line: u32,
 ) -> Result<(), Halt> {
 	let redirs = &unit.redirs[list as usize];
-	let zsh = unit.mode.dialect() == Dialect::Zsh;
-	let multios =
-		zsh && state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Multios).unwrap_or(true);
 	loop {
 		// Read without creating the progress: an empty list needs none.
 		let done = scratch(vp).io.as_ref().map_or(0, |io| io.redir.done);
-		// Past the list: the zsh duplicates of a several-word target.
-		let (r, copy) = if let Some(r) = redirs.get(done) {
-			(r, None)
-		} else {
-			let more = scratch(vp)
-				.io
-				.as_ref()
-				.and_then(|io| io.zsh.as_ref())
-				.and_then(|z| z.more.get(done - redirs.len()));
-			match more {
-				Some((i, t)) => (&redirs[*i as usize], Some(t.clone())),
-				None => return Ok(()),
-			}
+		let Some(r) = redirs.get(done) else {
+			return Ok(());
 		};
-		if multios && done == 0 && io(vp).zsh.as_ref().is_none_or(|z| z.multio.is_empty()) {
-			seed_pipeline(vp, unit);
-		}
-		let target = if let Some(t) = io(vp).redir.target.clone().or(copy) {
-			t
-		} else if zsh {
-			let mut words = zsh_target(k, vp, cx, unit, r, multios, line)?;
-			if words.len() > 1 {
-				// Several words: one redirection each, after the list.
-				let at = u32::try_from(done).unwrap_or(u32::MAX);
-				let progress = io(vp);
-				progress
-					.zsh()
-					.more
-					.extend(words.into_iter().map(|w| (at, w)));
-				progress.redir.done += 1;
-				scratch(vp).logs[Slot::Redirs as usize].clear();
-				continue;
-			}
-			let t = words.pop().unwrap_or_default();
-			io(vp).redir.target = Some(t.clone());
+		let target = if let Some(t) = io(vp).redir.target.clone() {
 			t
 		} else {
 			let t = target_text(k, vp, cx, unit, r, line)?;
@@ -122,9 +74,7 @@ pub fn apply(
 			t
 		};
 		let before = io(vp).saved.len();
-		if zsh {
-			zsh_install(k, vp, cx, r, &target, line, multios)?;
-		} else if k
+		if k
 			.deferrals
 			.iter()
 			.any(|d| d.vproc == vp.vpid && d.phase == DeferPhase::Collect)
@@ -232,10 +182,6 @@ fn target_text(
 ) -> Result<BString, Halt> {
 	match &r.target {
 		RedirTargetIr::HereDoc { text, quoted: true } => Ok(text.clone()),
-		RedirTargetIr::HereDoc { text, quoted: false } if unit.mode.dialect() == Dialect::Zsh => {
-			expanding(k, vp, cx, Slot::Redirs, true, line, |ex| ex.zsh_heredoc(text))
-				.map_err(Halt::Flow)
-		},
 		RedirTargetIr::HereDoc { text, quoted: false } => {
 			let mode = super::exec::mode_of(vp);
 			let tunit = match k.engine.text_unit(
@@ -298,50 +244,6 @@ fn target_text(
 			}
 		},
 	}
-}
-
-/// zsh `xpandredir`: the words the target of zsh redirection `r` names.
-/// With `multios` the word takes the full expansion and filename
-/// generation (several words make one redirection each; none is the empty
-/// name; `<&` needs exactly one: `file number expected`); without it the
-/// word expands to one string (`PREFORK_SINGLE`), not globbed.
-/// Here-documents and here-strings are [`target_text`]'s.
-#[inline(never)]
-fn zsh_target(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	unit: &Arc<Unit>,
-	r: &RedirIr,
-	multios: bool,
-	line: u32,
-) -> Result<Vec<BString>, Halt> {
-	let RedirTargetIr::Word(w) = r.target else {
-		return target_text(k, vp, cx, unit, r, line).map(|t| vec![t]);
-	};
-	if r.op == RedirKind::HereString {
-		return target_text(k, vp, cx, unit, r, line).map(|t| vec![t]);
-	}
-	let word = &unit.words[w as usize];
-	if !multios {
-		return expanding(k, vp, cx, Slot::Redirs, word.parks, line, |ex| ex.scalar(unit, word))
-			.map(|t| vec![t])
-			.map_err(Halt::Flow);
-	}
-	let (mut fields, globs) = expanding(k, vp, cx, Slot::Redirs, word.parks, line, |ex| {
-		let mut out = Vec::new();
-		let mut globs = Vec::new();
-		ex.fields_glob(unit, word, &mut out, &mut globs)?;
-		Ok((out, globs))
-	})
-	.map_err(Halt::Flow)?;
-	if !globs.is_empty() {
-		super::zsh::zglob::expand_globs(k, vp, cx, &mut fields, &globs, line).map_err(Halt::Flow)?;
-	}
-	if r.op == RedirKind::DupIn && fields.len() != 1 {
-		return Err(fail(k, vp, cx, line, zsh_msg("file number expected".into())));
-	}
-	Ok(fields)
 }
 
 /// Set fd `fd` to `h` (or close it), saving the previous object.
@@ -418,8 +320,7 @@ fn var_fd(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, name: &[u8]) -> Optio
 			state::Deref::Circular => return None,
 		};
 	let index = index.as_deref().map(|i| i.as_slice());
-	// zsh `{1}>&-`: a positional parameter (a `zle -F` handler closing the
-	// fd it was given).
+	// A positional parameter may hold an fd number.
 	if index.is_none() && !base.is_empty() && base.iter().all(u8::is_ascii_digit) {
 		let n: usize = std::str::from_utf8(&base).ok()?.parse().ok()?;
 		let args = state::positional_ref(&k.root, cx.store, vp).ok()?;
@@ -823,513 +724,6 @@ fn fail(k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, line: u32, d: Diag) -> 
 	Halt::Failed
 }
 
-/// zsh's message for a redirection failure.
-fn zsh_msg(msg: String) -> Diag {
-	Diag::Usage { msg: msg.into() }
-}
-
-/// zsh's `%e`: `strerror` with its first letter in lower case. Also the
-/// command layer's message for an external that did not start.
-pub(super) fn zsh_errno(err: &std::io::Error) -> String {
-	let text = crate::bash::diag::strerror(err);
-	let mut chars = text.chars();
-	chars.next().map_or_else(String::new, |c| {
-		let mut s: String = c.to_lowercase().collect();
-		s.push_str(chars.as_str());
-		s
-	})
-}
-
-/// zsh `execcmd`'s pipe ends: when the op running is a pipeline stage, its
-/// pipes are the first redirections of fd 1 (not the last stage) and fd 0
-/// (not the first stage), so a redirection of them makes a multio (`print
-/// x >file | cat` writes both).
-#[inline(never)]
-fn seed_pipeline(vp: &mut Vproc, unit: &Unit) {
-	let Some(f) = vp.frames.last() else {
-		return;
-	};
-	let base = matches!(f.kind, FrameKind::Stage)
-		|| (vp.frames.len() == 1 && matches!(f.kind, FrameKind::Subshell | FrameKind::Job { .. }));
-	if !base {
-		return;
-	}
-	let pc = f.pc;
-	let Some((i, n)) = unit
-		.spawns
-		.iter()
-		.filter(|s| s.kind == SpawnKind::Pipeline)
-		.find_map(|s| {
-			s.stages
-				.iter()
-				.position(|st| st.entry == pc)
-				.map(|i| (i, s.stages.len()))
-		})
-	else {
-		return;
-	};
-	let pipe = |h: &FdRef| h.origin() == FdOrigin::Mem && h.kind() == Some(FileKind::Pipe);
-	let out = vp.fds.get(1).filter(|h| i + 1 < n && pipe(h)).cloned();
-	let inp = vp.fds.get(0).filter(|h| i > 0 && pipe(h)).cloned();
-	let multio = &mut io(vp).zsh().multio;
-	if let Some(h) = out {
-		multio.push((1, true, vec![h]));
-	}
-	if let Some(h) = inp {
-		multio.push((0, false, vec![h]));
-	}
-}
-
-/// zsh `addfd`: put `h` on `fd`. With `multios`, a second redirection of
-/// the same fd in this list joins the first: outputs go to all of them (a
-/// tee), inputs are read one after the other (a cat); mixing directions is
-/// `file mode mismatch on fd N`.
-fn place(vp: &mut Vproc, fd: i32, h: FdRef, output: bool, multios: bool) -> Result<(), Diag> {
-	if !multios {
-		set_fd(vp, fd, Some(h));
-		return Ok(());
-	}
-	let multio = &mut io(vp).zsh().multio;
-	let Some(at) = multio.iter().position(|(f, ..)| *f == fd) else {
-		multio.push((fd, output, vec![h.clone()]));
-		set_fd(vp, fd, Some(h));
-		return Ok(());
-	};
-	let (_, out, fds) = &mut multio[at];
-	if *out != output {
-		return Err(zsh_msg(format!("file mode mismatch on fd {fd}")));
-	}
-	fds.push(h);
-	let all = fds.clone();
-	let merged: Box<dyn File> = if output {
-		Box::new(Tee { done: vec![0; all.len()], targets: all })
-	} else {
-		Box::new(Cat { sources: all, at: 0 })
-	};
-	set_fd(vp, fd, Some(FdRef::open(merged, FdOrigin::Host)));
-	Ok(())
-}
-
-/// The fd a zsh redirection targets: `{var}` allocates one ≥ 10 (zsh
-/// `movefd`), refused when `var` is read-only, or under `noclobber` when it
-/// holds an fd still open (zsh `execcmd`).
-fn zsh_target_fd(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	r: &RedirIr,
-) -> Result<i32, Diag> {
-	match &r.fd {
-		RedirFdIr::Default => Ok(default_fd(r.op)),
-		RedirFdIr::Num(n) => Ok(*n as i32),
-		RedirFdIr::Var(name) => {
-			let readonly = state::lookup_declared(&k.root, cx.store, vp, name)
-				.ok()
-				.flatten()
-				.is_some_and(|v| v.attrs.contains(crate::bash::store::Attrs::READONLY));
-			if readonly {
-				return Err(zsh_msg(format!(
-					"can't allocate file descriptor to readonly parameter {}",
-					name.as_bstr()
-				)));
-			}
-			let clobber =
-				state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Clobber).unwrap_or(true);
-			if !clobber
-				&& let Some(old) = var_fd(k, vp, cx, name)
-				&& vp.fds.get(old).is_some_and(FdRef::is_open)
-			{
-				return Err(zsh_msg(format!(
-					"can't clobber parameter {} containing file descriptor {old}",
-					name.as_bstr()
-				)));
-			}
-			Ok(super::jobctl::lowest_free_fd(k, vp, 10))
-		},
-	}
-}
-
-/// The flags zsh opens a file target with: `>` under `noclobber` refuses an
-/// existing regular file (unless empty with `clobberempty`; zsh
-/// `clobber_open`), `>>` under `noclobber` needs the file to exist unless
-/// `appendcreate`; `|`/`!` forms ignore both. `Err` is the refusal or a
-/// pending probe.
-fn zsh_flags(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	r: &RedirIr,
-	target: &BString,
-	line: u32,
-) -> Result<OpenFlags, Halt> {
-	let write = OpenFlags::WRITE.with(OpenFlags::CREATE);
-	let append = matches!(r.op, RedirKind::Append | RedirKind::AppendErr);
-	let output =
-		matches!(r.op, RedirKind::Out | RedirKind::Clobber | RedirKind::OutErr | RedirKind::DupOut);
-	if r.op == RedirKind::In {
-		return Ok(OpenFlags::READ);
-	}
-	if r.op == RedirKind::ReadWrite {
-		return Ok(OpenFlags::READ.with(write));
-	}
-	let clobber =
-		r.clobber || state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Clobber).unwrap_or(true);
-	if append {
-		let create = clobber
-			|| state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Appendcreate).unwrap_or(false);
-		return Ok(if create {
-			write.with(OpenFlags::APPEND)
-		} else {
-			OpenFlags::WRITE.with(OpenFlags::APPEND)
-		});
-	}
-	if output && !clobber {
-		let path = absolute(&vp.cwd, target);
-		let st = match super::command::command_probe(k, cx, vp, &Probe::Stat { path, follow: true }) {
-			Err(key) => return Err(Halt::Flow(Flow::Block(key))),
-			Ok(ProbeResult::Stat(st)) => st,
-			Ok(_) => None,
-		};
-		let empty_ok =
-			state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Clobberempty).unwrap_or(false);
-		if let Some(st) = st
-			&& st.kind == StatKind::File
-			&& !(empty_ok && st.size == 0)
-		{
-			let d = zsh_msg(format!("file exists: {}", target.as_bstr()));
-			return Err(fail(k, vp, cx, line, d));
-		}
-	}
-	Ok(write.with(OpenFlags::TRUNC))
-}
-
-/// `/dev/tty` in a vproc whose session has a terminal of its own (a `zpty`
-/// command's, [`super::proc::VprocZsh::ctty`]): that terminal. zsh's
-/// forked child opens its controlling terminal there; this process's
-/// `/dev/tty` would be the shell's.
-fn session_tty(vp: &Vproc, path: &[u8]) -> Option<FdRef> {
-	if path != b"/dev/tty" {
-		return None;
-	}
-	vp.zsh.as_deref().and_then(|z| z.ctty.0.clone())
-}
-
-/// Open `path` with `flags` (pollable) for a zsh redirection; a failure is
-/// zsh's `ERRNO: path`.
-fn zsh_open(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	path: &BString,
-	flags: OpenFlags,
-	line: u32,
-) -> Result<FdRef, Halt> {
-	if let Some(h) = session_tty(vp, path) {
-		return Ok(h);
-	}
-	if let Some(src) = dev_fd(path) {
-		return vp
-			.fds
-			.get(src)
-			.cloned()
-			.filter(FdRef::is_open)
-			.ok_or_else(|| {
-				let d = zsh_msg(format!("{}: bad file descriptor", path.as_bstr()));
-				fail(k, vp, cx, line, d)
-			});
-	}
-	let abs = absolute(&vp.cwd, path);
-	let umask = state::umask(cx.store, vp).unwrap_or(0o022);
-	let mut tcx = Context::from_waker(&k.waker);
-	let res = match io(vp).redir.opening.as_mut() {
-		Some(p) => p.poll(&mut tcx),
-		None => match cx.host.fs().open(BStr::new(&abs), flags, 0o666 & !umask) {
-			FsPoll::Ready(r) => Poll::Ready(r),
-			FsPoll::Pending(mut p) => {
-				let r = p.poll(&mut tcx);
-				if r.is_pending() {
-					io(vp).redir.opening = Some(p);
-				}
-				r
-			},
-		},
-	};
-	match res {
-		Poll::Pending => Err(Halt::Flow(Flow::Block(WaitKey::Fs { op: FsOp::Open, path: abs }))),
-		Poll::Ready(Ok(file)) => {
-			io(vp).redir.opening = None;
-			Ok(FdRef::open(file, FdOrigin::Host))
-		},
-		Poll::Ready(Err(err)) => {
-			io(vp).redir.opening = None;
-			let d = zsh_msg(format!("{}: {}", zsh_errno(&err), path.as_bstr()));
-			Err(fail(k, vp, cx, line, d))
-		},
-	}
-}
-
-/// Apply one redirection of a zsh unit (zsh `execcmd`'s redirection loop
-/// with `addfd`).
-#[inline(never)]
-fn zsh_install(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	r: &RedirIr,
-	target: &BString,
-	line: u32,
-	multios: bool,
-) -> Result<(), Halt> {
-	let place_on =
-		|k: &mut Kernel, vp: &mut Vproc, cx: &mut Cx<'_>, fd: i32, h: FdRef, out: bool| {
-			place(vp, fd, h, out, multios).map_err(|d| fail(k, vp, cx, line, d))
-		};
-	match r.op {
-		RedirKind::HereDoc | RedirKind::HereString => {
-			let fd = zsh_target_fd(k, vp, cx, r).map_err(|d| fail(k, vp, cx, line, d))?;
-			let h = FdRef::mem(MemBuf::new(target.to_vec()));
-			if let RedirFdIr::Var(name) = &r.fd {
-				set_fd(vp, fd, Some(h));
-				return assign_fd_var(k, vp, cx, name, fd, line).map_err(|d| fail(k, vp, cx, line, d));
-			}
-			place_on(k, vp, cx, fd, h, false)
-		},
-		RedirKind::Close => zsh_close(k, vp, cx, r, line),
-		RedirKind::DupIn | RedirKind::DupOut if target.as_slice() == b"-" => {
-			zsh_close(k, vp, cx, r, line)
-		},
-		RedirKind::DupIn | RedirKind::DupOut => {
-			let output = r.op == RedirKind::DupOut;
-			let src = if target.as_slice() == b"p" {
-				// The coprocess: `>&p` writes its input, `<&p` reads its output.
-				let Some(co) = vp.coprocs.last() else {
-					return Err(fail(k, vp, cx, line, zsh_msg("no coprocess".into())));
-				};
-				Some(if output { co.write } else { co.read })
-			} else if !target.is_empty() && target.iter().all(u8::is_ascii_digit) {
-				std::str::from_utf8(target)
-					.ok()
-					.and_then(|s| s.parse().ok())
-			} else {
-				None
-			};
-			let Some(src) = src else {
-				if output && matches!(r.fd, RedirFdIr::Default) {
-					// `>& file`: `&> file`.
-					restricted_write(k, vp, cx, line)?;
-					let flags = zsh_flags(k, vp, cx, r, target, line)?;
-					let h = zsh_open(k, vp, cx, target, flags, line)?;
-					place_on(k, vp, cx, 1, h.clone(), true)?;
-					return place_on(k, vp, cx, 2, h, true);
-				}
-				let d = zsh_msg(format!("file number expected: {}", target.as_bstr()));
-				return Err(fail(k, vp, cx, line, d));
-			};
-			let Some(h) = vp.fds.get(src).cloned().filter(FdRef::is_open) else {
-				return Err(fail(k, vp, cx, line, zsh_msg(format!("{src}: bad file descriptor"))));
-			};
-			let fd = zsh_target_fd(k, vp, cx, r).map_err(|d| fail(k, vp, cx, line, d))?;
-			if let RedirFdIr::Var(name) = &r.fd {
-				set_fd(vp, fd, Some(h));
-				return assign_fd_var(k, vp, cx, name, fd, line).map_err(|d| fail(k, vp, cx, line, d));
-			}
-			place_on(k, vp, cx, fd, h, output)
-		},
-		RedirKind::OutErr | RedirKind::AppendErr => {
-			restricted_write(k, vp, cx, line)?;
-			let flags = zsh_flags(k, vp, cx, r, target, line)?;
-			let h = zsh_open(k, vp, cx, target, flags, line)?;
-			place_on(k, vp, cx, 1, h.clone(), true)?;
-			place_on(k, vp, cx, 2, h, true)
-		},
-		RedirKind::In
-		| RedirKind::Out
-		| RedirKind::Append
-		| RedirKind::Clobber
-		| RedirKind::ReadWrite => {
-			if r.op != RedirKind::In {
-				restricted_write(k, vp, cx, line)?;
-			}
-			let fd = zsh_target_fd(k, vp, cx, r).map_err(|d| fail(k, vp, cx, line, d))?;
-			let flags = zsh_flags(k, vp, cx, r, target, line)?;
-			let h = zsh_open(k, vp, cx, target, flags, line)?;
-			if let RedirFdIr::Var(name) = &r.fd {
-				set_fd(vp, fd, Some(h));
-				return assign_fd_var(k, vp, cx, name, fd, line).map_err(|d| fail(k, vp, cx, line, d));
-			}
-			// `<>` is both: never part of a multio.
-			if r.op == RedirKind::ReadWrite {
-				set_fd(vp, fd, Some(h));
-				return Ok(());
-			}
-			place_on(k, vp, cx, fd, h, r.op != RedirKind::In)
-		},
-	}
-}
-
-/// zsh's `IS_WRITE_FILE` check under `restricted`: a redirection writing a
-/// file fails before the file is opened.
-fn restricted_write(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	line: u32,
-) -> Result<(), Halt> {
-	if state::zsh_option(&mut k.root, cx.store, vp, ZshOpt::Restricted).unwrap_or(false) {
-		let d = zsh_msg("writing redirection not allowed in restricted mode".into());
-		return Err(fail(k, vp, cx, line, d));
-	}
-	Ok(())
-}
-
-/// zsh `<&-` / `>&-`: close the fd; `{var}<&-` closes the fd `var` holds
-/// (`parameter var does not contain a file descriptor` when it holds none,
-/// refused for a read-only `var`, `failed to close file descriptor N` when
-/// it is not open).
-fn zsh_close(
-	k: &mut Kernel,
-	vp: &mut Vproc,
-	cx: &mut Cx<'_>,
-	r: &RedirIr,
-	line: u32,
-) -> Result<(), Halt> {
-	let fd = match &r.fd {
-		RedirFdIr::Var(name) => {
-			let readonly = state::lookup_declared(&k.root, cx.store, vp, name)
-				.ok()
-				.flatten()
-				.is_some_and(|v| v.attrs.contains(crate::bash::store::Attrs::READONLY));
-			if readonly {
-				let d = zsh_msg(format!(
-					"can't close file descriptor from readonly parameter {}",
-					name.as_bstr()
-				));
-				return Err(fail(k, vp, cx, line, d));
-			}
-			let Some(fd) = var_fd(k, vp, cx, name) else {
-				let d =
-					zsh_msg(format!("parameter {} does not contain a file descriptor", name.as_bstr()));
-				return Err(fail(k, vp, cx, line, d));
-			};
-			if !vp.fds.get(fd).is_some_and(FdRef::is_open) {
-				let d = zsh_msg(format!("failed to close file descriptor {fd}: bad file descriptor"));
-				return Err(fail(k, vp, cx, line, d));
-			}
-			fd
-		},
-		RedirFdIr::Num(n) => *n as i32,
-		RedirFdIr::Default => default_fd(r.op),
-	};
-	set_fd(vp, fd, None);
-	super::exec::coproc_fd_closed(k, vp, cx, fd);
-	Ok(())
-}
-
-/// zsh's multio tee (`closemn` for output): every write goes to each
-/// target in turn; a target that is gone (closed, failed) is skipped. A
-/// write that cannot finish keeps how far each target got, for the
-/// caller's retry of the same bytes.
-struct Tee {
-	targets: Vec<FdRef>,
-	done:    Vec<usize>,
-}
-
-impl File for Tee {
-	fn poll_read(&mut self, _cx: &mut Context<'_>, _buf: &mut [u8]) -> Poll<std::io::Result<usize>> {
-		Poll::Ready(Ok(0))
-	}
-
-	fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
-		self.done.resize(self.targets.len(), 0);
-		let mut pending = false;
-		for (t, done) in self.targets.iter().zip(&mut self.done) {
-			while *done < buf.len() {
-				match t.poll_write(cx, &buf[*done..]) {
-					Poll::Ready(Ok(n)) if n > 0 => *done += n,
-					Poll::Ready(_) => *done = buf.len(),
-					Poll::Pending => {
-						pending = true;
-						break;
-					},
-				}
-			}
-		}
-		if pending {
-			return Poll::Pending;
-		}
-		self.done.fill(0);
-		Poll::Ready(Ok(buf.len()))
-	}
-
-	fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-		for t in &self.targets {
-			if t.poll_flush(cx).is_pending() {
-				return Poll::Pending;
-			}
-		}
-		Poll::Ready(Ok(()))
-	}
-
-	fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
-		Err(std::io::ErrorKind::Unsupported.into())
-	}
-
-	fn kind(&self) -> FileKind {
-		FileKind::Pipe
-	}
-
-	fn os_handle(&self) -> Option<OsHandle> {
-		None
-	}
-
-	fn dup(&self) -> std::io::Result<Box<dyn File>> {
-		Ok(Box::new(Self { targets: self.targets.clone(), done: Vec::new() }))
-	}
-}
-
-/// zsh's multio cat (`closemn` for input): reads each source to its end in
-/// turn.
-struct Cat {
-	sources: Vec<FdRef>,
-	at:      usize,
-}
-
-impl File for Cat {
-	fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<std::io::Result<usize>> {
-		while let Some(src) = self.sources.get(self.at) {
-			match src.poll_read(cx, buf) {
-				Poll::Ready(Ok(0)) => self.at += 1,
-				other => return other,
-			}
-		}
-		Poll::Ready(Ok(0))
-	}
-
-	fn poll_write(&mut self, _cx: &mut Context<'_>, _buf: &[u8]) -> Poll<std::io::Result<usize>> {
-		Poll::Ready(Err(std::io::Error::other(crate::bash::fd::BadFd)))
-	}
-
-	fn poll_flush(&mut self, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-		Poll::Ready(Ok(()))
-	}
-
-	fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
-		Err(std::io::ErrorKind::Unsupported.into())
-	}
-
-	fn kind(&self) -> FileKind {
-		FileKind::Pipe
-	}
-
-	fn os_handle(&self) -> Option<OsHandle> {
-		None
-	}
-
-	fn dup(&self) -> std::io::Result<Box<dyn File>> {
-		Ok(Box::new(Self { sources: self.sources.clone(), at: self.at }))
-	}
-}
-
 /// Open `path` (pollable) and install it on every fd of `fds`.
 fn open_into(
 	k: &mut Kernel,
@@ -1340,12 +734,6 @@ fn open_into(
 	flags: OpenFlags,
 	line: u32,
 ) -> Result<(), Halt> {
-	if let Some(h) = session_tty(vp, path) {
-		for &fd in fds {
-			set_fd(vp, fd, Some(h.clone()));
-		}
-		return Ok(());
-	}
 	if let Some(src) = dev_fd(path) {
 		let Some(h) = vp.fds.get(src).cloned().filter(FdRef::is_open) else {
 			k.diag(cx, vp, line, Diag::Io {

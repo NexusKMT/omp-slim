@@ -377,17 +377,6 @@ pub fn truncate(root: &mut state::Root, store: &mut dyn StateStore, vp: &mut Vpr
 	vp.calls.retain(|c| c.depth as usize <= frames);
 }
 
-/// zsh `$0` inside a `.` file run under `FUNCTION_ARGZERO`, when no function
-/// call is nearer: the file name as given. `None` when a function call
-/// (or nothing) is the innermost level.
-pub fn source_argzero(vp: &Vproc) -> Option<&BString> {
-	vp.calls.iter().rev().find_map(|c| match &c.kind {
-		CallKind::Source { argzero, .. } => Some(argzero.as_ref()),
-		CallKind::Function { .. } => Some(None),
-		CallKind::Args(_) => None,
-	})?
-}
-
 /// The calls a subshell of `vp` starts with: all of them, none tied to its
 /// own frames.
 pub fn inherited(vp: &Vproc) -> Vec<Call> {

@@ -11,9 +11,7 @@
 //! Words print as the text bash stores for them: `\newline` removed, `$'…'`
 //! decoded and single-quoted, `$"…"` as `"…"`, command substitutions as
 //! bash re-prints them (`Comsub.text`), compound assignments with single
-//! spaces. zsh words ([`WordPart::Zsh`]) print as their untokenized,
-//! unmetafied text; zsh-only constructs (`repeat`, `always`, anonymous
-//! functions, `&|`, `>>|`) print in zsh syntax.
+//! spaces.
 
 use alloc::vec::Vec;
 
@@ -25,7 +23,6 @@ use crate::bash::syntax::{
 		RedirFd, RedirTarget, Seq, Simple, Subscript, While, Word, WordPart,
 	},
 	util::{ansi_decode, push_u32, sh_single_quote},
-	zsh::tok,
 };
 
 /// Output layout.
@@ -35,9 +32,6 @@ pub enum PrintStyle {
 	DeclareF,
 	/// Everything on one line (here-document bodies follow the line).
 	Compact,
-	/// zsh's function text (`functions`, `$functions`, `which`): what the
-	/// engine keeps as a zsh function's source (zsh 5.9 `text.c`).
-	Zsh,
 }
 
 /// Render one command.
@@ -67,16 +61,11 @@ pub fn print(cmd: Command<'_>, style: PrintStyle) -> Vec<u8> {
 			c.flush_docs();
 			c.out
 		},
-		PrintStyle::Zsh => match cmd.kind() {
-			CommandKind::FuncDef(f) => crate::bash::syntax::zsh::function_text(f.name(), f),
-			_ => crate::bash::syntax::zsh::command_text(cmd),
-		},
 	}
 }
 
 /// What `declare -f name` prints for function definition `cmd` defining
-/// `name` alone (a zsh definition of several names prints each name by
-/// itself).
+/// `name` alone.
 pub fn print_function_as(cmd: Command<'_>, name: &[u8]) -> Vec<u8> {
 	let CommandKind::FuncDef(f) = cmd.kind() else {
 		return print(cmd, PrintStyle::DeclareF);
@@ -126,12 +115,6 @@ pub fn print_list(list: List<'_>, style: PrintStyle) -> Vec<u8> {
 			c.list(list);
 			c.flush_docs();
 			c.out
-		},
-		PrintStyle::Zsh => {
-			if let Some((_, f)) = lone_funcdef(list) {
-				return crate::bash::syntax::zsh::function_text(f.name(), f);
-			}
-			crate::bash::syntax::zsh::getpermtext(list, 0)
 		},
 	}
 }
@@ -1210,28 +1193,7 @@ fn part_text(p: WordPart<'_>, out: &mut Vec<u8>, ctx: Ctx) {
 		Part::BadSubst(text) => out.extend_from_slice(text),
 		Part::BadComsub(b) => out.extend_from_slice(b.text()),
 		Part::DroppedQuote => out.push(b'"'),
-		Part::Zsh(raw) => zsh_text(raw, out),
-	}
-}
-
-/// The source-like text of a zsh word (zsh `untokenize` then `unmetafy`):
-/// tokens become the characters they stand for, quotes included, and
-/// `Nularg` is dropped. Used by both printers and the JSON export.
-pub fn zsh_text(raw: &[u8], out: &mut Vec<u8>) {
-	let mut i = 0;
-	while i < raw.len() {
-		let c = raw[i];
-		i += 1;
-		if c == tok::META && i < raw.len() {
-			out.push(raw[i] ^ 32);
-			i += 1;
-		} else if tok::is_tok(c) {
-			if let Some(ch) = tok::tok_char(c) {
-				out.push(ch);
-			}
-		} else {
-			out.push(c);
-		}
+		Part::Zsh(raw) => out.extend_from_slice(raw),
 	}
 }
 

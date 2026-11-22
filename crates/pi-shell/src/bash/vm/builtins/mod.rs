@@ -24,54 +24,11 @@ mod kill;
 mod mapfile;
 pub mod misc;
 mod names;
-mod options;
 mod printf;
 pub mod strftime;
 mod test;
 pub mod trap;
 mod vars;
-pub mod zsh_args;
-pub(crate) mod zsh_dir;
-pub mod zsh_jobs;
-mod zsh_kill;
-mod zsh_mod_attr;
-mod zsh_mod_cap;
-mod zsh_mod_clone;
-pub mod zsh_mod_curses;
-mod zsh_mod_datetime;
-pub mod zsh_mod_example;
-mod zsh_mod_files;
-pub mod zsh_mod_langinfo;
-pub mod zsh_mod_mapfile;
-pub mod zsh_mod_mathfunc;
-pub mod zsh_mod_nearcolor;
-pub mod zsh_mod_newuser;
-pub mod zsh_mod_pcre;
-mod zsh_mod_private;
-pub mod zsh_mod_regex;
-mod zsh_mod_rlimits;
-pub mod zsh_mod_sched;
-mod zsh_mod_socket;
-mod zsh_mod_stat;
-pub mod zsh_mod_system;
-pub mod zsh_mod_tcp;
-pub mod zsh_mod_termcap;
-pub mod zsh_mod_terminfo;
-mod zsh_mod_util;
-pub mod zsh_mod_watch;
-pub mod zsh_mod_zftp;
-pub mod zsh_mod_zprof;
-pub mod zsh_mod_zpty;
-mod zsh_mod_zselect;
-mod zsh_mod_zutil;
-pub mod zsh_module;
-pub mod zsh_names;
-pub mod zsh_print;
-pub mod zsh_prompt;
-pub mod zsh_quote;
-pub mod zsh_typeset;
-pub mod zsh_vars;
-pub mod zsh_zcompile;
 
 use bstr::{BStr, BString};
 
@@ -82,9 +39,8 @@ pub use self::{
 	trap::hard_ignore,
 	vars::{
 		Lhs, assign, assign_loop_var, assign_special_prefix, declare_line, define_function,
-		emit_assignment, emit_assignment_at, parse_compound, prefix_value, set_value,
+		emit_assignment, emit_assignment_at, prefix_value, set_value,
 	},
-	zsh_vars::assign_zsh_loop_var,
 };
 use super::{
 	Cx, Kernel,
@@ -114,10 +70,6 @@ pub enum Need {
 	/// Run this command substitution ([`super::expand::Stop::Sub`]), then
 	/// run the builtin again.
 	Sub(super::expand::Stop),
-	/// Park until `WaitKey`'s source is ready, then run the builtin again
-	/// (the line editor waiting for a key: `vared`, `zle WIDGET`); its
-	/// progress lives in the vproc's editor state.
-	Park(crate::bash::event::WaitKey),
 }
 
 impl From<StoreError> for Need {
@@ -266,13 +218,6 @@ impl<'a, 'c> Ctx<'a, 'c> {
 
 	/// The answer to `p`, or a request for it.
 	pub fn probe(&self, p: Probe) -> Result<ProbeResult, Need> {
-		// A digest this shell already read answers at once, as its probe
-		// would: an `$fpath` search asks every digest for every function.
-		if let Probe::DumpHas(q) = &p
-			&& let Some(funcs) = self.k.dump_funcs(&q.path, (q.mtime_ns, q.size))
-		{
-			return Ok(ProbeResult::Ok(funcs.contains(q.name.as_slice())));
-		}
 		// Each probe is answered once (only an unanswered one joins the
 		// log), so the answer at the replay position is the only one.
 		let at = self.probe_at.get();
@@ -409,20 +354,6 @@ impl<'a, 'c> Ctx<'a, 'c> {
 		);
 	}
 
-	/// A zsh option (env options read their bash twin).
-	pub fn zsh_option(&mut self, opt: crate::bash::zshopt::ZshOpt) -> Result<bool, Need> {
-		Ok(state::zsh_option(&mut self.k.root, self.cx.store, self.vp, opt)?)
-	}
-
-	/// Set a zsh option.
-	pub fn set_zsh_option(
-		&mut self,
-		opt: crate::bash::zshopt::ZshOpt,
-		on: bool,
-	) -> Result<(), Need> {
-		Ok(state::set_zsh_option(&mut self.k.root, self.cx.store, self.vp, opt, on)?)
-	}
-
 	/// A non-variable record.
 	pub fn record(&mut self, key: Key<'_>) -> Result<Option<Record>, Need> {
 		Ok(state::record(self.cx.store, self.vp, key)?.cloned())
@@ -447,11 +378,6 @@ impl<'a, 'c> Ctx<'a, 'c> {
 /// Run builtin `id` with `argv` (`argv[0]` is its name).
 pub fn run(id: IntrinsicId, ctx: &mut Ctx<'_, '_>, argv: &[BString]) -> R {
 	use IntrinsicId as I;
-	if ctx.vp.mode.dialect() == crate::bash::ids::Dialect::Zsh
-		&& let Some(r) = zsh_args::run(id, ctx, argv)
-	{
-		return r;
-	}
 	let args = &argv[1..];
 	// bash `CHECK_HELPOPT`: every builtin but these prints its help.
 	if args.first().is_some_and(|a| a.as_slice() == b"--help")
@@ -518,15 +444,11 @@ pub fn run(id: IntrinsicId, ctx: &mut Ctx<'_, '_>, argv: &[BString]) -> R {
 		// nothing.
 		I::Builtin => done(0),
 		I::Caller => caller::caller(ctx, args),
-		I::Emulate => options::emulate(ctx, args),
-		I::Setopt => options::setopt(ctx, args, false),
-		I::Unsetopt => options::setopt(ctx, args, true),
 		I::Exec | I::Getln => {
 			ctx.diag(Diag::Unsupported { what: format!("the `{}' builtin", ctx.name).into() });
 			done(2)
 		},
-		// zsh-only builtins: `zsh_args::run` handles each of them in a zsh
-		// unit, and no other dialect resolves them.
+		// zsh-only builtins: nothing resolves them without the zsh dialect.
 		I::Print
 		| I::Pushln
 		| I::Integer
@@ -616,6 +538,9 @@ pub fn run(id: IntrinsicId, ctx: &mut Ctx<'_, '_>, argv: &[BString]) -> R {
 		| I::Zsocket
 		| I::Ztcp
 		| I::Zftp
+		| I::Emulate
+		| I::Setopt
+		| I::Unsetopt
 		| I::ModuleStub => done(2),
 	}
 }

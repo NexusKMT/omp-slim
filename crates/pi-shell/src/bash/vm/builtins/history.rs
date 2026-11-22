@@ -1,29 +1,31 @@
 //! History: bash's `history` builtin and history list (`builtins/history.def`,
-//! `bashhist.c`) here, zsh's (`hist.c`, `bin_fc`) in the submodules.
+//! `bashhist.c`) here, its expansion and file operations in the submodules.
 //!
-//! The bash list holds the lines the reader [`remember`]s while `set -o
+//! The list holds the lines the reader [`remember`]s while `set -o
 //! history` is on, plus `history -s` entries. Entries are numbered from a
 //! base that grows as `HISTSIZE` drops the oldest ones.
 //!
-//! zsh's list ([`model`]) is driven by the reader through [`zsh`] (`hbegin`,
-//! history expansion, `hend`, the startup read and the exit save), its file
-//! is [`file`], its expansion [`bang`], its builtins [`zfc`].
+//! [`bang`] expands `!` events; [`bash`] reads and writes the history file
+//! and runs `fc`'s editor.
 
 pub mod bang;
 pub mod bash;
-pub mod file;
 pub mod io;
+#[cfg_attr(
+	not(test),
+	allow(
+		dead_code,
+		reason = "the zsh history ring outlived the embedded zsh dialect; bash history uses a subset"
+	)
+)]
 pub mod model;
 pub mod words;
-pub mod zfc;
-pub mod zsh;
 
 use bstr::{BString, ByteSlice};
 
 use super::{Control, Ctx, Outcome, R, done, number, opts};
 use crate::bash::{
 	diag::Diag,
-	ids::Dialect,
 	store::{Key, KeyBuf, MiscKey, OptId, Record, StateStore, StoreError},
 	vm::{
 		Kernel,
@@ -185,8 +187,7 @@ fn keep_line(control: &[u8], line: &[u8], list: &mut List) -> bool {
 }
 
 /// Whether the shell's input lines join the history (the reader asks
-/// before it parses a command): bash with `set -o history` on, zsh when
-/// interactive and reading standard input (zsh `hbegin`'s `stophist`).
+/// before it parses a command): `set -o history` on.
 ///
 /// # Errors
 /// [`StoreError`] when an option record cannot be read.
@@ -199,9 +200,6 @@ pub fn recording(
 	if crate::bash::vm::is_tool(store, vp)? {
 		return Ok(false);
 	}
-	if vp.mode.dialect() == Dialect::Zsh {
-		return zsh::active(root, store, vp);
-	}
 	state::option(root, store, vp, OptId::History)
 }
 
@@ -209,8 +207,7 @@ pub fn recording(
 /// `lines` (the input lines the command spans, without their newlines)
 /// join the history list, each unless `HISTCONTROL` excludes it
 /// (`maybe_add_history`) or `HISTIGNORE` matches it; `now` stamps them
-/// while `HISTTIMEFORMAT` is set. zsh's reader calls [`zsh::hend`] instead.
-/// A store failure is recorded on the kernel.
+/// while `HISTTIMEFORMAT` is set. A store failure is recorded on the kernel.
 pub fn remember(
 	k: &mut Kernel,
 	store: &mut dyn StateStore,

@@ -260,9 +260,6 @@ pub struct Parser<'s> {
 	cond_line:      u32,
 	/// Whether the last `[[ … ]]` token read was the end of input.
 	cond_eof:       bool,
-	/// The zsh grammar under [`Features::ZSH`]: every call goes to it
-	/// (boxed: a bash parser stays as small as it was).
-	zsh:            Option<Box<crate::bash::syntax::zsh::ZshParser<'s>>>,
 	/// Whether a comment consumed the virtual trailing backslash.
 	virt_comment:   bool,
 	/// The error being raised is one bash recovers from by dropping the
@@ -378,18 +375,11 @@ impl<'s> Parser<'s> {
 			cond_eof: false,
 			virt_comment: false,
 			discard_line: false,
-			zsh: feat
-				.contains(Features::ZSH)
-				.then(|| Box::new(crate::bash::syntax::zsh::ZshParser::new(src, feat, aliases))),
 		}
 	}
 
 	/// Resume at `pos` (from an earlier [`Parser::pos`] over the same source).
 	pub fn with_pos(mut self, pos: Pos) -> Self {
-		if let Some(z) = self.zsh.take() {
-			self.zsh = Some(Box::new(z.with_pos(pos)));
-			return self;
-		}
 		self.frames.clear();
 		self.buf = self.src;
 		self.pos = (pos.offset as usize).min(self.src.len());
@@ -402,11 +392,7 @@ impl<'s> Parser<'s> {
 	/// ([`Parser::resume`]), alias text included: the pending text is read
 	/// as an alias expansion (with the active aliases suppressed), then the
 	/// source continues at `resume.pos`.
-	pub fn with_resume(mut self, resume: &'s Resume) -> Self {
-		if let Some(z) = self.zsh.take() {
-			self.zsh = Some(Box::new(z.with_resume(resume)));
-			return self;
-		}
+	pub fn with_resume(self, resume: &'s Resume) -> Self {
 		let mut p = self.with_pos(resume.pos);
 		if resume.pending.is_empty() {
 			return p;
@@ -437,9 +423,6 @@ impl<'s> Parser<'s> {
 	/// done with a command hands its tree back here so the next one does
 	/// not allocate. [`Parser::take_tree`] returns buffers no command took.
 	pub fn recycle(&mut self, mut tree: Tree) {
-		if let Some(z) = &mut self.zsh {
-			return z.recycle(tree);
-		}
 		tree.clear();
 		self.t = tree;
 	}
@@ -447,9 +430,6 @@ impl<'s> Parser<'s> {
 	/// The buffers the next command would be built in (see
 	/// [`Parser::recycle`]).
 	pub fn take_tree(&mut self) -> Tree {
-		if let Some(z) = &mut self.zsh {
-			return z.take_tree();
-		}
 		core::mem::take(&mut self.t)
 	}
 
@@ -459,18 +439,12 @@ impl<'s> Parser<'s> {
 	/// offset after the aliased word; use [`Parser::resume`] to keep the
 	/// unread alias text.
 	pub fn pos(&self) -> Pos {
-		if let Some(z) = &self.zsh {
-			return z.pos();
-		}
 		Pos { offset: self.src_pos() as u32, line: self.line }
 	}
 
 	/// Where the next [`Parser::next_command`] starts, with any unread alias
 	/// text; feed it to [`Parser::with_resume`] on a new parser.
 	pub fn resume(&self) -> Resume {
-		if let Some(z) = &self.zsh {
-			return z.resume();
-		}
 		let pending = self.alias_text_left();
 		let active = if pending.is_empty() {
 			Vec::new()
@@ -485,23 +459,6 @@ impl<'s> Parser<'s> {
 		self.feat
 	}
 
-	/// Under [`Features::ZSH`], the constructs left open where the input
-	/// ran out, outermost first, as zsh names them in `PS2`'s `%_` (`if`,
-	/// `then`, `dquote`, `cmdand`, `heredoc`, …); `None` for the bash
-	/// grammar. Describes the event the last [`Parser::next_command`] call
-	/// parsed: non-empty when the input ran out inside those constructs,
-	/// even if that call returned a command (a here-document cut short);
-	/// see [`crate::bash::syntax::zsh::ZshParser::cmdstack`].
-	pub fn zsh_cmdstack(&self) -> Option<Vec<&'static str>> {
-		let z = self.zsh.as_ref()?;
-		Some(
-			z.cmdstack()
-				.iter()
-				.map(|&cs| crate::bash::syntax::zsh::cmdname(cs))
-				.collect(),
-		)
-	}
-
 	/// Parse the next top-level command; `None` at end of input.
 	///
 	/// After an error the parser stays at end of input: a non-interactive
@@ -509,9 +466,6 @@ impl<'s> Parser<'s> {
 	/// is an error with [`ParseError::recovered`] set: parsing goes on with
 	/// the next line.
 	pub fn next_command(&mut self) -> Option<Result<CompleteCommand, ParseError>> {
-		if let Some(z) = &mut self.zsh {
-			return z.next_command();
-		}
 		if self.failed {
 			return None;
 		}

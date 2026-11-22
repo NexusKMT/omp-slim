@@ -30,8 +30,8 @@ use super::{
 	CallOutcome, Cx, Kernel, Shell, host_stdio,
 	proc::{
 		Atom, Awaited, ExecState, Frame, FrameKind, JobState, Live, LoopRec, PendingSub,
-		PendingWrite, Probe, ProbeResult, RedirProgress, Run, Saved, Scratch, ScratchIo, ScratchZsh,
-		ScriptKind, Stage, Target, Vproc,
+		PendingWrite, Probe, ProbeResult, RedirProgress, Run, Saved, Scratch, ScratchIo, ScriptKind,
+		Stage, Target, Vproc,
 	},
 	state::{self, Overlay, Root, Scope},
 };
@@ -267,8 +267,6 @@ struct ProcImage {
 	own_traps:     super::proc::OwnTraps,
 	/// Current mode (the root's is also `MiscKey::Mode`).
 	mode:          ModeId,
-	/// zsh state (sticky emulation, frames' restores).
-	zsh:           Option<Box<super::proc::VprocZsh>>,
 	/// Host lineage (a detached tree stays detached after a restore).
 	lineage:       crate::bash::host::Lineage,
 	/// What the vproc was parked on and the wake count then: a restored
@@ -358,7 +356,6 @@ struct ScratchImage {
 	exec:         Option<ExecState>,
 	redir_done:   usize,
 	redir_target: Option<BString>,
-	redir_more:   Vec<(u32, BString)>,
 	probes:       Vec<(Probe, ProbeResult)>,
 	/// The probe in flight and the bytes an fd read has taken so far: a
 	/// restored `read`/`select` neither loses them nor repeats its prompt
@@ -408,7 +405,6 @@ fn scratch_image(
 			| Live::Timer(_)
 			| Live::Fd(_)
 			| Live::Fs(_)
-			| Live::Zftp(_)
 			| Live::None => {},
 		}
 		state
@@ -431,10 +427,6 @@ fn scratch_image(
 		Live::Fs(_) => report
 			.lost
 			.push(Lost::Pending { vpid, kind: FileKind::Regular }),
-		// zftp's traffic on its sockets.
-		Live::Zftp(_) => report
-			.lost
-			.push(Lost::Pending { vpid, kind: FileKind::Socket }),
 		_ => {},
 	}
 	let io = sc.io.as_deref();
@@ -456,9 +448,6 @@ fn scratch_image(
 		exec,
 		redir_done: io.map_or(0, |io| io.redir.done),
 		redir_target: io.and_then(|io| io.redir.target.clone()),
-		redir_more: io
-			.and_then(|io| io.zsh.as_ref())
-			.map_or_default(|z| z.more.clone()),
 		probes: sc.probes().to_vec(),
 		probing: sc.probing().cloned(),
 		input: io.map_or_default(|io| io.input.clone()),
@@ -618,7 +607,6 @@ impl Shell {
 				calls: p.calls.clone(),
 				own_traps: p.own_traps,
 				mode: p.mode,
-				zsh: p.zsh.clone(),
 				lineage: p.lineage,
 				blocked: p.blocked.as_ref().map(|b| (b.key.clone(), b.at)),
 			});
@@ -849,7 +837,6 @@ impl Shell {
 			vp.calls = p.calls;
 			vp.own_traps = p.own_traps;
 			vp.mode = p.mode;
-			vp.zsh = p.zsh;
 			vp.lineage = p.lineage;
 			if let Some((id, node)) = p.command {
 				let unit = load_unit(
@@ -955,7 +942,6 @@ impl Shell {
 						// (`Scratch::io`).
 						let io = if img.redir_done == 0
 							&& img.redir_target.is_none()
-							&& img.redir_more.is_empty()
 							&& img.probes.is_empty()
 							&& img.probing.is_none()
 							&& img.input.is_empty()
@@ -975,9 +961,7 @@ impl Shell {
 								search: None,
 								input: img.input,
 								walk: None,
-								zsh: (!img.redir_more.is_empty()).then(|| {
-									Box::new(ScratchZsh { more: img.redir_more, ..ScratchZsh::default() })
-								}),
+								prompted: false,
 							}))
 						};
 						Some(Box::new(Scratch {

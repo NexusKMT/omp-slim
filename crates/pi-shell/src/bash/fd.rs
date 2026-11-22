@@ -477,9 +477,10 @@ impl FdWeak {
 		self.0.strong_count() > 0
 	}
 
-	/// Whether it is a handle to the same object as `r`.
-	pub fn is(&self, r: &FdRef) -> bool {
-		self.0.as_ptr().addr() == r.key()
+	/// Whether `other` is the same object this weak reference observes.
+	#[cfg(test)]
+	pub fn is(&self, other: &FdRef) -> bool {
+		self.0.ptr_eq(&other.downgrade().0)
 	}
 }
 

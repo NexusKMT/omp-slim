@@ -1,16 +1,16 @@
 /**
- * `omp zsh|bash|sh [args...]`: the pi-shell engine as a process shell, run
+ * `omp bash|sh [args...]`: the pi-shell engine as a process shell, run
  * in this process through the native `runShellMain`.
  *
- * The argv after `omp` reaches the shell untouched (`omp zsh --help`, `-c`,
+ * The argv after `omp` reaches the shell untouched (`omp bash --help`, `-c`,
  * `-i`, `-l`, `--emulate`, scripts), its first word becoming the shell's
  * `argv[0]` (which picks the dialect). `cli.ts` dispatches here before the
- * command framework loads; the registered `zsh`/`bash`/`sh` commands exist
+ * command framework loads; the registered `bash`/`sh` commands exist
  * for `omp --help` and the generated completions.
  */
 
 /** The shells `omp` runs natively, by command word. */
-export const NATIVE_SHELLS: Readonly<Record<string, true>> = { zsh: true, bash: true, sh: true };
+export const NATIVE_SHELLS: Readonly<Record<string, true>> = { bash: true, sh: true };
 
 /** Whether `word` (the first argv word) names a native shell. */
 export function isNativeShell(word: string | undefined): word is string {

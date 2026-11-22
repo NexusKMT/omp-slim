@@ -1,5 +1,5 @@
-//! The filesystem steps of history file operations (zsh `readhistfile`,
-//! `savehistfile`, `lockhistfile`; bash `history -a -n -r -w`).
+//! The filesystem steps of history file operations (bash `history -a -n -r
+//! -w` and `fc`'s editor's temporary file).
 //!
 //! A history operation is written as a pure function of the answers to the
 //! steps it asked for so far ([`Steps`]): it runs from the start each time
@@ -60,35 +60,6 @@ pub enum HistOp {
 		/// Absolute path.
 		path: BString,
 	},
-	/// `rename`.
-	Rename {
-		/// Absolute path renamed.
-		from: BString,
-		/// Absolute path replaced.
-		to:   BString,
-	},
-	/// `symlink(target, path)`.
-	Symlink {
-		/// Link contents.
-		target: BString,
-		/// Absolute path created.
-		path:   BString,
-	},
-	/// `link(from, to)`.
-	Link {
-		/// Existing file.
-		from: BString,
-		/// Absolute path created.
-		to:   BString,
-	},
-	/// Take an `fcntl` record lock on the file (zsh `histfcntllock`), held
-	/// until [`HistOp::Unlock`] or the end of the operation.
-	Lock {
-		/// Absolute path.
-		path: BString,
-	},
-	/// Release the [`HistOp::Lock`] lock.
-	Unlock,
 	/// The canonical physical path ([`HistOut::Bytes`]).
 	RealPath {
 		/// Absolute path.
@@ -111,11 +82,8 @@ impl HistOp {
 			| Self::Read { path }
 			| Self::Write { path, .. }
 			| Self::Unlink { path }
-			| Self::Symlink { path, .. }
-			| Self::Lock { path }
 			| Self::RealPath { path } => path.clone(),
-			Self::Rename { to, .. } | Self::Link { to, .. } => to.clone(),
-			Self::Unlock | Self::Sleep { .. } | Self::Now => BString::default(),
+			Self::Sleep { .. } | Self::Now => BString::default(),
 		}
 	}
 }
@@ -227,16 +195,32 @@ impl<'a> Steps<'a> {
 			_ => Err(Pending(probe)),
 		}
 	}
-
-	/// The wall clock (one step).
-	///
-	/// # Errors
-	/// [`Pending`] while unanswered.
-	pub fn now(&mut self) -> Result<i64, Pending> {
-		Ok(match self.ask(HistOp::Now)? {
-			Ok(HistOut::Now(t)) => t,
-			_ => 0,
-		})
+}
+/// Run one history operation with its steps answered from `ctx`'s probe
+/// cache: every answered step is read, an unanswered one becomes the
+/// builtin's next probe ([`Need::Probe`]) and the operation starts over.
+pub fn in_builtin<T>(
+	ctx: &super::super::Ctx<'_, '_>,
+	run: impl Fn(&mut Steps<'_>) -> Result<T, Pending>,
+) -> Result<T, super::super::Need> {
+	loop {
+		let outcome = {
+			let answered = ctx.answered();
+			let lookup = |p: &Probe| {
+				answered
+					.iter()
+					.find(|(q, _)| q == p)
+					.map(|(_, r)| r.clone())
+			};
+			let mut steps = Steps::new(&lookup, 0);
+			run(&mut steps)
+		};
+		match outcome {
+			Ok(value) => return Ok(value),
+			Err(Pending(p)) => {
+				ctx.probe(p)?;
+			},
+		}
 	}
 }
 
@@ -298,15 +282,6 @@ pub fn perform(
 			polled.map(|r| r.map(HistOut::Stat).map_err(|e| HistErr::of(&e)))
 		},
 		HistOp::Unlink { path } => unit_op(tcx, sc, || cx.host.fs().unlink(BStr::new(path))),
-		HistOp::Rename { from, to } => {
-			unit_op(tcx, sc, || cx.host.fs().rename(BStr::new(from), BStr::new(to)))
-		},
-		HistOp::Symlink { target, path } => {
-			unit_op(tcx, sc, || cx.host.fs().symlink(BStr::new(target), BStr::new(path)))
-		},
-		HistOp::Link { from, to } => {
-			unit_op(tcx, sc, || cx.host.fs().link(BStr::new(from), BStr::new(to)))
-		},
 		HistOp::Sleep { ns } => {
 			if !matches!(sc.live, Live::Timer(_)) {
 				let at = Deadline(cx.host.now_ns().saturating_add(*ns));
@@ -318,27 +293,6 @@ pub fn perform(
 				return Poll::Pending;
 			}
 			Poll::Ready(Ok(HistOut::Done))
-		},
-		HistOp::Unlock => {
-			sc.io().zsh().hist_lock = None;
-			Poll::Ready(Ok(HistOut::Done))
-		},
-		HistOp::Lock { path } => {
-			let polled = match &mut sc.live {
-				Live::Open(fut) => fut.poll(tcx),
-				live => {
-					let started = cx.host.fs().lock(BStr::new(path));
-					ready(started, live, Live::Open, tcx)
-				},
-			};
-			match polled {
-				Poll::Pending => Poll::Pending,
-				Poll::Ready(Ok(file)) => {
-					sc.io().zsh().hist_lock = Some(file);
-					Poll::Ready(Ok(HistOut::Done))
-				},
-				Poll::Ready(Err(e)) => Poll::Ready(Err(HistErr::of(&e))),
-			}
 		},
 		HistOp::RealPath { path } => {
 			let polled = match &mut sc.live {

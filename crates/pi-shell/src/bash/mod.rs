@@ -57,14 +57,10 @@ pub mod term;
 mod text;
 pub mod trace;
 mod vm;
-pub mod zshopt;
 
 pub mod pattern;
 pub mod syntax;
 
-/// zsh/newuser's startup check: the `newuser` scripts an interactive zsh
-/// sources after `/etc/zshenv` when the user has no startup files.
-pub use crate::bash::vm::newuser_startup_scripts;
 pub use crate::bash::{
 	diag::Diag,
 	engine::{Engine, EngineConfig},

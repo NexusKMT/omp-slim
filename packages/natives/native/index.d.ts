@@ -2701,11 +2701,11 @@ export declare function renderMermaidAscii(text: string, options?: MermaidRender
 export declare function renderSnapcompactPng(text: string, options: SnapcompactRenderOptions): Promise<string>
 
 /**
- * Run the pi-shell engine as a process shell in this process (`omp zsh`,
- * `omp bash`, `omp sh`).
+ * Run the pi-shell engine as a process shell in this process (`omp bash`,
+ * `omp sh`).
  *
  * `argv` is the shell's whole command line,
- * `argv[0]` naming it (`zsh`, `bash` or `sh` pick the dialect), as a real
+ * `argv[0]` naming it (`bash` or `sh` pick the dialect), as a real
  * shell gets it. Synchronous: blocks the calling thread until the shell
  * exits and returns the status the process should exit with (0–255; 101
  * after a panic). The shell uses the process's own stdin, stdout, stderr,

@@ -299,7 +299,7 @@ let runningCommand: string | undefined;
 
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export async function runCli(argv: string[]): Promise<void> {
-	// `omp zsh|bash|sh [args...]`: the whole argv belongs to the shell (`--help`,
+	// `omp bash|sh [args...]`: the whole argv belongs to the shell (`--help`,
 	// `--profile`, `-c` included), so it dispatches before profile bootstrap,
 	// prepaint, network setup and the command table.
 	if (isNativeShell(argv[0])) {

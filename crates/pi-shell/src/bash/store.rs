@@ -43,7 +43,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::bash::{
 	ids::{JobId, ModeId, UnitId, Vpid},
 	signal::Signal,
-	zshopt::{ZshOpt, ZshOpts},
 };
 
 /// Persistent shell state, record by record.
@@ -180,8 +179,6 @@ pub enum Table {
 	Scope,
 	/// Variables of those scopes ([`Record::Var`] or [`Record::Unset`]).
 	Local,
-	/// zsh options ([`Key::ZshOpt`], [`Record::Opt`]).
-	ZshOpt,
 	/// zsh global and suffix aliases ([`Key::ZshAlias`],
 	/// [`Record::Alias`]); regular aliases are [`Table::Alias`] in every
 	/// dialect.
@@ -222,10 +219,6 @@ pub enum Key<'a> {
 		/// Variable name.
 		name:  &'a BStr,
 	},
-	/// A zsh mode option (absent: the `zsh` emulation default). The env
-	/// options zsh shares with bash ([`ZshOpt::env_twin`]) are never
-	/// stored here but under [`Key::Opt`].
-	ZshOpt(ZshOpt),
 	/// A zsh global (`alias -g`) or suffix (`alias -s`) alias.
 	ZshAlias {
 		/// `alias -s`: `name` is a file suffix.
@@ -251,7 +244,6 @@ impl Key<'_> {
 			Self::Misc(_) => Table::Misc,
 			Self::Scope(_) => Table::Scope,
 			Self::Local { .. } => Table::Local,
-			Self::ZshOpt(_) => Table::ZshOpt,
 			Self::ZshAlias { .. } => Table::ZshAlias,
 		}
 	}
@@ -271,7 +263,6 @@ impl Key<'_> {
 			Self::Misc(m) => KeyBuf::Misc(m),
 			Self::Scope(d) => KeyBuf::Scope(d),
 			Self::Local { depth, name } => KeyBuf::Local { depth, name: name.into() },
-			Self::ZshOpt(o) => KeyBuf::ZshOpt(o),
 			Self::ZshAlias { suffix, name } => KeyBuf::ZshAlias { suffix, name: name.into() },
 		}
 	}
@@ -319,8 +310,6 @@ pub enum KeyBuf {
 		/// Variable name.
 		name:  BString,
 	},
-	/// See [`Key::ZshOpt`].
-	ZshOpt(ZshOpt),
 	/// See [`Key::ZshAlias`].
 	ZshAlias {
 		/// `alias -s`.
@@ -346,7 +335,6 @@ impl KeyBuf {
 			Self::Misc(m) => Key::Misc(*m),
 			Self::Scope(d) => Key::Scope(*d),
 			Self::Local { depth, name } => Key::Local { depth: *depth, name: BStr::new(name) },
-			Self::ZshOpt(o) => Key::ZshOpt(*o),
 			Self::ZshAlias { suffix, name } => {
 				Key::ZshAlias { suffix: *suffix, name: BStr::new(name) }
 			},
@@ -433,8 +421,8 @@ pub enum Record {
 }
 
 /// zsh sticky emulation (zsh `struct emulation_options`): the emulation
-/// and the options `emulate MODE [-R] [-o OPT|+o OPT]… -c` named, applied
-/// on entry to a function defined while it ran.
+/// and whether `emulate -R` reset every option, applied on entry to a
+/// function defined while it ran.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Sticky {
 	/// The emulation.
@@ -442,10 +430,6 @@ pub struct Sticky {
 	/// `emulate -R`: every non-special option reset, not only the
 	/// emulation-relevant ones.
 	pub full: bool,
-	/// Options `-o` turned on.
-	pub on:   Vec<ZshOpt>,
-	/// Options `+o` turned off.
-	pub off:  Vec<ZshOpt>,
 }
 
 /// What a zsh-dialect or mode-switching function call restores when it
@@ -455,9 +439,6 @@ pub struct Sticky {
 pub struct ZshScope {
 	/// The caller's mode.
 	pub mode:            ModeId,
-	/// Every zsh option at entry, env options included: restored on return
-	/// under `localoptions` or after a sticky switch.
-	pub opts:            ZshOpts,
 	/// The caller's sticky emulation (zsh's global `sticky`).
 	pub sticky:          Option<Sticky>,
 	/// The call applied a sticky emulation: options, mode and sticky come
@@ -631,16 +612,9 @@ fn zsh_hash(key: &[u8]) -> u32 {
 		.fold(0u32, |h, &c| h.wrapping_add(h.wrapping_shl(5)).wrapping_add(u32::from(c)))
 }
 
-/// The bucket of `key` (raw bytes, hashed metafied as zsh stores parameter
-/// names) in a zsh hash table of `buckets` buckets.
+/// The bucket of `key` in a zsh hash table of `buckets` buckets.
 pub fn zsh_bucket(key: &[u8], buckets: usize) -> usize {
-	use crate::bash::syntax::zsh::tok::{is_meta, metafy};
-	let h = if key.iter().any(|&c| is_meta(c)) {
-		zsh_hash(&metafy(key))
-	} else {
-		zsh_hash(key)
-	};
-	(h as usize).checked_rem(buckets).unwrap_or(0)
+	(zsh_hash(key) as usize).checked_rem(buckets).unwrap_or(0)
 }
 
 impl AssocArray {
@@ -1189,8 +1163,7 @@ pub enum MiscKey {
 	/// zsh's named directory table (`Record::Words`): the table's growth
 	/// count (decimal), then one name and one value per entry in zsh's
 	/// iteration order, the value being a flags byte (`ND_USERNAME`,
-	/// `ND_NOABBREV`) followed by the directory
-	/// ([`crate::bash::vm::zsh::nameddir`]).
+	/// `ND_NOABBREV`) followed by the directory.
 	ZshNamedDirs,
 	/// bash's `current_command_number` (decimal; absent: 1), the prompt's
 	/// `\#`: an interactive reader adds one per top-level command it runs.
@@ -1201,7 +1174,7 @@ pub enum MiscKey {
 	/// zsh's module tables (`modulestab`, autoloadable builtins,
 	/// conditions, math functions and parameters) when they differ from
 	/// the ones zsh boots with (`Record::Misc`, postcard;
-	/// [`crate::bash::vm::builtins::zsh_module`]).
+	/// (zsh/module).
 	ZshModules,
 	/// zsh/mathfunc's `signgam`: the sign of Γ the last `lgamma()` left
 	/// (`Record::Misc`, decimal; absent: 0).
@@ -1247,11 +1220,11 @@ pub enum MiscKey {
 	/// zsh/pcre's compiled pattern (`pcre_compile`): `Record::Words` of
 	/// the PCRE option bits (decimal) and the pattern; absent when none
 	/// was compiled or the last compile failed
-	/// ([`crate::bash::vm::builtins::zsh_mod_pcre`]).
+	/// (zsh/pcre).
 	ZshPcre,
 	/// zsh/zftp's sessions and connection state between commands
 	/// (`Record::Misc`, postcard;
-	/// [`crate::bash::vm::builtins::zsh_mod_zftp`]).
+	/// (zsh/zftp).
 	Zftp,
 	/// zsh/zftp's status files shared with subshells (zsh's `zfstatfd`;
 	/// `Record::Misc`, postcard), kept in the root store.
@@ -1262,15 +1235,15 @@ pub enum MiscKey {
 	/// and `${(k)termcap}` list (`Record::Misc`: a byte telling how ncurses
 	/// set it up, `S` `setupterm` only, `T` `tgetent`, `F` `tgetent` then a
 	/// failed one, then the terminal name;
-	/// [`crate::bash::vm::builtins::zsh_mod_terminfo`]).
+	/// (zsh/terminfo).
 	ZshCurTerm,
 	/// `unset mapfile` left zsh/mapfile's special unset (zsh's `PM_UNSET`)
 	/// until the next assignment to it or a module unload (`Record::Misc`,
-	/// `1`; [`crate::bash::vm::builtins::zsh_mod_mapfile`]).
+	/// `1`; (zsh/mapfile).
 	ZshMapfileUnset,
 	/// zsh/computil's `compdescribe` state between `-i`/`-I` and the `-g`
 	/// calls (`cd_state`; `Record::Misc`, postcard;
-	/// `crate::bash::vm::zle::comp::computil`).
+	/// the computil state).
 	ZshCompDescribe,
 	/// zsh/computil's `comparguments` state (`ca_laststate` and its
 	/// definitions; `Record::Misc`, postcard).
@@ -1283,7 +1256,7 @@ pub enum MiscKey {
 	ZshCompTags,
 	/// zsh/compctl's definitions (`compctltab`, the pattern compctls, the
 	/// `-C`/`-D`/`-T` compctls and the global matchers; `Record::Misc`,
-	/// postcard; `crate::bash::vm::zle::comp::compctl`).
+	/// postcard; the compctl table).
 	ZshCompctl,
 	/// zsh's type of `SECONDS` (`setsecondstype`; `Record::Misc`): `i`, `E`
 	/// or `F`, then the base or precision (decimal); absent: an integer.
@@ -1297,7 +1270,7 @@ pub enum MiscKey {
 	/// per function, newest first as zsh lists them: the name, `s` for a
 	/// string function (`-Ms`) or empty, the fewest and most arguments
 	/// (decimal, -1 for no limit), and the shell function it calls (empty:
-	/// the same name) ([`crate::bash::vm::zsh::arith`]).
+	/// the same name).
 	ZshMathFuncs,
 	/// The `PATH` whose directories zsh's command table holds every
 	/// command of (zsh `pathchecked` at the end of `path`, after
@@ -1326,8 +1299,6 @@ pub enum Change<'a> {
 	/// [`Key::Scope`], none of those three under any other key; a
 	/// [`Key::Local`] of a depth with no [`Key::Scope`] record is a shape
 	/// error, and so is a [`Key::Scope`] beyond the top one plus one.
-	/// [`Key::ZshOpt`] takes only [`Record::Opt`] and never an env option
-	/// ([`ZshOpt::env_twin`]: those live under [`Key::Opt`]);
 	/// [`Key::ZshAlias`] takes only [`Record::Alias`].
 	Put(Key<'a>, Record),
 	/// Delete a record (absent: no effect). Deleting [`Key::Scope`] `d`
@@ -1583,10 +1554,7 @@ mod tests {
 	use bstr::{BStr, BString};
 
 	use super::{AssocArray, Attrs, Key, KeyBuf, MiscKey, OptId, TrapKey};
-	use crate::bash::{
-		ids::{JobId, Vpid},
-		zshopt::ZshOpt,
-	};
+	use crate::bash::ids::{JobId, Vpid};
 
 	#[test]
 	fn assoc_index_preserves_order_clone_and_snapshot_representation() {
@@ -1644,7 +1612,6 @@ mod tests {
 			Key::Misc(MiscKey::Umask),
 			Key::Scope(2),
 			Key::Local { depth: 1, name: BStr::new("x") },
-			Key::ZshOpt(ZshOpt::Extendedglob),
 			Key::ZshAlias { suffix: true, name: BStr::new("txt") },
 		];
 		for key in keys {

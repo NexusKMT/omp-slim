@@ -86,9 +86,8 @@ use serde::{Deserialize, Serialize};
 
 use self::lower::lower;
 pub(crate) use self::lower::{
-	ANON, abort_unit, ansi_c, ansi_c_with, function_from_parsed, function_from_source,
-	function_from_source_at, lower_compound, lower_deferred, lower_deferred_hashed, lower_text,
-	materialize, replay_hasher, replay_id, syntax_unit,
+	ANON, abort_unit, ansi_c, ansi_c_with, function_from_source, lower_compound, lower_deferred,
+	lower_deferred_hashed, lower_text, materialize, replay_hasher, replay_id, syntax_unit,
 };
 use crate::bash::{
 	event::{EventKind, EventMask, NodeKind, RedirKind},

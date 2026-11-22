@@ -42,7 +42,6 @@ mod class;
 mod ere;
 pub mod glob;
 mod strmatch;
-pub mod zsh;
 
 use core::ops::Range;
 

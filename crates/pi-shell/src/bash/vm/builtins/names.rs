@@ -44,16 +44,6 @@ pub struct Aliases {
 	private:  bool,
 }
 
-impl Aliases {
-	fn is_empty(&self) -> bool {
-		self.regular.is_empty()
-			&& self.global.is_empty()
-			&& self.suffix.is_empty()
-			&& self.reswords.is_empty()
-			&& !self.private
-	}
-}
-
 impl AliasLookup for Aliases {
 	fn alias(&self, name: &[u8]) -> Option<&[u8]> {
 		self.regular.get(name).map(|v| v.as_slice())
@@ -83,9 +73,6 @@ pub fn alias_table(
 	cx: &mut Cx<'_>,
 	vp: &Vproc,
 ) -> Result<Option<Aliases>, StoreError> {
-	if vp.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		return zsh_alias_table(k, cx, vp);
-	}
 	let on = state::option(&mut k.root, cx.store, vp, OptId::ExpandAliases)?
 		|| state::option(&mut k.root, cx.store, vp, OptId::Posix)?;
 	if !on {
@@ -99,49 +86,6 @@ pub fn alias_table(
 		})
 		.collect();
 	Ok((!regular.is_empty()).then(|| Aliases { regular, ..Aliases::default() }))
-}
-
-/// [`alias_table`] in the zsh dialect: with the `aliases` option on, the
-/// regular, global and suffix aliases not turned off by `disable -a`/`-s`;
-/// always the reserved words `disable -r` turned off.
-fn zsh_alias_table(
-	k: &mut Kernel,
-	cx: &mut Cx<'_>,
-	vp: &Vproc,
-) -> Result<Option<Aliases>, StoreError> {
-	use crate::bash::store::{Key, MiscKey};
-	fn words(cx: &mut Cx<'_>, vp: &Vproc, key: MiscKey) -> Result<Vec<BString>, StoreError> {
-		Ok(match state::record(cx.store, vp, Key::Misc(key))? {
-			Some(Record::Words(w)) => w.clone(),
-			_ => Vec::new(),
-		})
-	}
-	let mut table = Aliases {
-		reswords: words(cx, vp, MiscKey::ZshDisabledReswords)?,
-		private: super::zsh_module::loaded(cx.store, vp, b"zsh/param/private")?,
-		..Aliases::default()
-	};
-	if state::zsh_option(&mut k.root, cx.store, vp, crate::bash::zshopt::ZshOpt::Aliases)? {
-		let off = words(cx, vp, MiscKey::ZshDisabledAliases)?;
-		let off_suffix = words(cx, vp, MiscKey::ZshDisabledSuffixAliases)?;
-		for (key, rec) in state::scan(&k.root, cx.store, vp, Table::Alias)? {
-			if let (KeyBuf::Alias(n), Record::Alias(v)) = (key, rec)
-				&& !off.contains(&n)
-			{
-				table.regular.insert(n, v);
-			}
-		}
-		for (key, rec) in state::scan(&k.root, cx.store, vp, Table::ZshAlias)? {
-			if let (KeyBuf::ZshAlias { suffix, name }, Record::Alias(v)) = (key, rec) {
-				if suffix && !off_suffix.contains(&name) {
-					table.suffix.insert(name, v);
-				} else if !suffix && !off.contains(&name) {
-					table.global.insert(name, v);
-				}
-			}
-		}
-	}
-	Ok((!table.is_empty()).then_some(table))
 }
 
 /// bash `legal_alias_name`.
@@ -313,17 +257,6 @@ pub fn flush_hash(
 	vp: &mut Vproc,
 ) -> Result<(), StoreError> {
 	for (key, _) in state::scan(root, store, vp, Table::CmdHash)? {
-		state::store_record(root, store, vp, key, None);
-	}
-	// zsh: the emptied table is filled again from the start of `$path`.
-	if state::record(
-		store,
-		vp,
-		crate::bash::store::Key::Misc(crate::bash::store::MiscKey::ZshPathChecked),
-	)?
-	.is_some()
-	{
-		let key = crate::bash::store::KeyBuf::Misc(crate::bash::store::MiscKey::ZshPathChecked);
 		state::store_record(root, store, vp, key, None);
 	}
 	Ok(())
@@ -550,7 +483,7 @@ pub fn command_v(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 ///
 /// Programmable completion is interactive; scripts use `compgen` for word
 /// lists. Generated: the actions answerable from shell state (alias,
-/// builtin, function, keyword, variable, shopt, setopt), then `-W`'s words
+/// builtin, function, keyword, variable, shopt), then `-W`'s words
 /// (split on `IFS`, without bash's expansions of the list), filtered by
 /// `-X` (a leading `!` keeps the matches instead) and wrapped in `-P`/`-S`.
 /// Actions that read the system (files, commands, users, jobs, …), `-G`,
@@ -606,13 +539,9 @@ pub fn compgen(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 					}),
 			),
 			b"alias" => words.extend(all_aliases(ctx)?.into_iter().map(|(n, _)| n)),
-			b"shopt" | b"setopt" => {
+			b"shopt" => {
 				use strum::IntoEnumIterator;
-				let kind = if action.as_slice() == b"shopt" {
-					OptKind::Shopt
-				} else {
-					OptKind::Set
-				};
+				let kind = OptKind::Shopt;
 				let mut names: Vec<&'static str> = OptId::iter()
 					.filter(|o| o.kind() == kind)
 					.map(<&'static str>::from)

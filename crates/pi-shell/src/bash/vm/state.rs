@@ -24,7 +24,6 @@ use crate::bash::{
 		Attrs, Change, Elem, Key, KeyBuf, MiscKey, OptId, Record, StateStore, StoreError, Table,
 		VarValue, ZshScope,
 	},
-	zshopt::{ZshOpt, ZshOpts},
 };
 
 /// bash's `$RANDOM` generator (`lib/sh/random.c`): the Park–Miller
@@ -328,11 +327,6 @@ pub struct Root {
 	/// (`noglob`/`extglob` per expansion, `errexit`, `functrace`).
 	opts_on:           u128,
 	opts_known:        u128,
-	/// Root zsh option values ([`Key::ZshOpt`]), valid where `zopts_known`
-	/// has the bit; read only by zsh-dialect code, so the bash paths never
-	/// touch them.
-	zopts_on:          ZshOpts,
-	zopts_known:       ZshOpts,
 	/// Bumped whenever a root option record changes or the option facts are
 	/// dropped: what a cache of option-derived settings is valid for
 	/// ([`Self::opts_gen`]).
@@ -427,15 +421,6 @@ const fn opt_value(opt: OptId, rec: Option<&Record>) -> bool {
 	}
 }
 
-/// The value a zsh option record stands for (`None` or another shape: the
-/// `zsh` emulation default).
-const fn zsh_opt_value(opt: ZshOpt, rec: Option<&Record>) -> bool {
-	match rec {
-		Some(Record::Opt(on)) => *on,
-		_ => opt.default_in(crate::bash::ids::ModeId::Zsh),
-	}
-}
-
 /// The store key of global variable `name`.
 fn var_key(name: &[u8]) -> Key<'_> {
 	Key::Var(BStr::new(name))
@@ -526,7 +511,6 @@ impl Root {
 	pub fn invalidate(&mut self, store: &mut dyn StateStore, epoch: u64) {
 		self.epoch = epoch;
 		self.opts_known = 0;
-		self.zopts_known = ZshOpts::default();
 		self.builtins_disabled = None;
 		self.locale_gen += 1;
 		self.opts_gen += 1;
@@ -620,11 +604,6 @@ impl Root {
 				}
 				self.opts_gen += 1;
 			},
-			KeyBuf::ZshOpt(opt) => {
-				self.zopts_known.set(*opt, true);
-				self.zopts_on.set(*opt, zsh_opt_value(*opt, rec.as_ref()));
-				self.opts_gen += 1;
-			},
 			KeyBuf::Misc(MiscKey::DisabledBuiltins) => {
 				self.builtins_disabled = Some(matches!(&rec, Some(Record::Words(w)) if !w.is_empty()));
 			},
@@ -635,13 +614,6 @@ impl Root {
 			None => Change::Del(key.as_key()),
 		};
 		self.write(store, change);
-	}
-
-	/// Changes whenever a root option record does (or the option facts are
-	/// dropped): settings derived from root options stay valid while it is
-	/// the same.
-	pub const fn opts_gen(&self) -> u64 {
-		self.opts_gen
 	}
 
 	/// The root value of `opt`: a bit test once it was read or written.
@@ -661,24 +633,6 @@ impl Root {
 			}
 		}
 		Ok(self.opts_on & bit != 0)
-	}
-
-	/// The root value of zsh mode option `opt` (not an env twin; see
-	/// [`zsh_option`]): a bit test once it was read or written.
-	///
-	/// # Errors
-	/// [`StoreError`] when the option record cannot be read.
-	pub fn zsh_option(
-		&mut self,
-		store: &mut dyn StateStore,
-		opt: ZshOpt,
-	) -> Result<bool, StoreError> {
-		if !self.zopts_known.get(opt) {
-			let on = zsh_opt_value(opt, store.get(Key::ZshOpt(opt))?);
-			self.zopts_known.set(opt, true);
-			self.zopts_on.set(opt, on);
-		}
-		Ok(self.zopts_on.get(opt))
 	}
 
 	/// Whether the root list of `enable -n`'d builtins is non-empty: a flag
@@ -885,39 +839,6 @@ fn vec_binding(vp: &Vproc, name: &[u8]) -> Option<usize> {
 		}
 		Some(i)
 	})
-}
-
-/// Whether the innermost scope binding `name`, with no zsh/param/private
-/// visibility applied (zsh's raw parameter table node), holds a private
-/// parameter: zsh's `createparam` of a global `name` then fails (`NAME:
-/// can't change parameter attribute`, the private being `PM_RO_BY_DESIGN`).
-///
-/// # Errors
-/// [`StoreError`] when the store cannot be read.
-pub fn innermost_private(
-	root: &Root,
-	store: &mut dyn StateStore,
-	vp: &Vproc,
-	name: &[u8],
-) -> Result<bool, StoreError> {
-	if vp.overlay.is_none() {
-		let Some(depth) = root_binding_below(root, store, name, root.depth, false)? else {
-			return Ok(false);
-		};
-		return Ok(matches!(
-			store.get(local_key(depth, name))?,
-			Some(Record::Var(v)) if v.attrs.contains(Attrs::ZSH_PRIVATE)
-		));
-	}
-	Ok(vp
-		.scopes
-		.iter()
-		.rev()
-		.find_map(|s| s.vars.get(name))
-		.is_some_and(|e| {
-			e.as_ref()
-				.is_some_and(|v| v.attrs.contains(Attrs::ZSH_PRIVATE))
-		}))
 }
 
 /// The innermost root function scope.
@@ -1174,28 +1095,6 @@ pub fn lookup_declared<'a>(
 	var_at(store, vp, name, at)
 }
 
-/// A declared variable and its binding scope, from one dynamic lookup.
-/// The scope is `None` for an overlay or global binding; name references
-/// are not followed and declared-but-unset variables are returned.
-///
-/// # Errors
-/// [`StoreError`] when a variable cannot be read.
-#[inline]
-pub fn lookup_declared_scoped<'a>(
-	root: &Root,
-	store: &'a mut dyn StateStore,
-	vp: &'a Vproc,
-	name: &[u8],
-) -> Result<(Option<&'a Var>, Option<usize>), StoreError> {
-	let at = bound_at(root, store, vp, name)?;
-	let scope = match at {
-		At::Scope(In::Vec(i)) => Some(i),
-		At::Scope(In::Store(depth)) => Some(depth as usize),
-		At::Overlay | At::Global => None,
-	};
-	Ok((var_at(store, vp, name, at)?, scope))
-}
-
 /// A token for a cache of something derived from the locale variables
 /// `names` (each `LANG` or `LC_*`) as `vp` sees them: equal tokens mean
 /// equal values. `None` when one of them is bound in `vp`'s scopes or
@@ -1291,6 +1190,10 @@ pub enum VarEdit<'e> {
 	/// Insert `key` into an associative array at the front of its bucket
 	/// among `buckets` ([`AssocArray::insert_front`]: zsh's hash order);
 	/// clears [`Attrs::INVISIBLE`].
+	#[allow(
+		dead_code,
+		reason = "zsh hash-order insert; the zsh parameter code that built it is gone"
+	)]
 	Insert {
 		/// The key (absent; a present one takes the value in place).
 		key:     &'e [u8],
@@ -2089,87 +1992,6 @@ pub fn option(
 	root.option(store, opt)
 }
 
-/// A zsh option as `vp` sees it: an env option ([`ZshOpt::env_twin`])
-/// reads its bash twin, a mode option its own record.
-///
-/// # Errors
-/// [`StoreError`] when the option record cannot be read.
-pub fn zsh_option(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &Vproc,
-	opt: ZshOpt,
-) -> Result<bool, StoreError> {
-	if let Some((twin, inverted)) = opt.env_twin() {
-		return Ok(option(root, store, vp, twin)? != inverted);
-	}
-	if let Some(ov) = &vp.overlay
-		&& let Some(entry) = ov.records.get(&KeyBuf::ZshOpt(opt))
-	{
-		return Ok(zsh_opt_value(opt, entry.as_ref()));
-	}
-	root.zsh_option(store, opt)
-}
-
-/// Set zsh option `opt` for `vp` (an env option writes its bash twin);
-/// nothing is written when it already has that value.
-///
-/// # Errors
-/// [`StoreError`] when the current value cannot be read.
-pub fn set_zsh_option(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &mut Vproc,
-	opt: ZshOpt,
-	on: bool,
-) -> Result<(), StoreError> {
-	if zsh_option(root, store, vp, opt)? == on {
-		return Ok(());
-	}
-	let (key, rec) = match opt.env_twin() {
-		Some((twin, inverted)) => (KeyBuf::Opt(twin), Record::Opt(on != inverted)),
-		None => (KeyBuf::ZshOpt(opt), Record::Opt(on)),
-	};
-	store_record(root, store, vp, key, Some(rec));
-	Ok(())
-}
-
-/// Every zsh option as `vp` sees it, env options included (a zsh call's
-/// saved set, `setopt` listings).
-///
-/// # Errors
-/// [`StoreError`] when an option record cannot be read.
-pub fn zsh_options(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &Vproc,
-) -> Result<ZshOpts, StoreError> {
-	use strum::IntoEnumIterator;
-	let mut set = ZshOpts::default();
-	for opt in ZshOpt::iter() {
-		set.set(opt, zsh_option(root, store, vp, opt)?);
-	}
-	Ok(set)
-}
-
-/// Make `vp`'s zsh options equal `want`, writing only those that differ
-/// (a zsh call's return, `emulate`).
-///
-/// # Errors
-/// [`StoreError`] when an option record cannot be read.
-pub fn set_zsh_options(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &mut Vproc,
-	want: &ZshOpts,
-) -> Result<(), StoreError> {
-	use strum::IntoEnumIterator;
-	for opt in ZshOpt::iter() {
-		set_zsh_option(root, store, vp, opt, want.get(opt))?;
-	}
-	Ok(())
-}
-
 /// Every record of `table` as `vp` sees it, sorted by key (variables: the
 /// global ones, then function-local ones shadowing them; declared-but-unset
 /// ones left out).
@@ -2292,8 +2114,7 @@ fn push_exported(out: &mut Vec<(BString, BString)>, name: &[u8], var: &Var) {
 		&& !var.attrs.contains(Attrs::INVISIBLE)
 		&& let VarValue::Str(s) = &var.value
 	{
-		let value =
-			super::zsh::params::stored_float_display(var.attrs, s).unwrap_or_else(|| s.clone());
+		let value = s.clone();
 		out.push((BString::from(name), value));
 	}
 }
@@ -2565,38 +2386,6 @@ pub fn scope_zsh(
 	})
 }
 
-/// Replace the zsh call state of scope `i` of `vp` (`lossy` bits, saved
-/// traps).
-pub fn set_scope_zsh(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &mut Vproc,
-	i: usize,
-	zsh: Option<Box<ZshScope>>,
-) {
-	match scope_in(vp, i) {
-		In::Vec(i) => {
-			if let Some(s) = vp.scopes.get_mut(i) {
-				s.zsh = zsh;
-			}
-		},
-		In::Store(depth) => {
-			if depth >= root.depth {
-				return;
-			}
-			let header = root_scope(store, depth)
-				.map(|(func, positional, _)| (func.cloned(), positional.map(<[BString]>::to_vec)));
-			match header {
-				Ok((func, positional)) => {
-					let rec = Record::Scope { func, positional, zsh };
-					root.write(store, Change::Put(Key::Scope(depth), rec));
-				},
-				Err(err) => root.fail(err),
-			}
-		},
-	}
-}
-
 /// The innermost function scope of `vp` (`local`'s), by index.
 ///
 /// # Errors
@@ -2756,25 +2545,6 @@ pub fn scope_set(
 		root.materialize(store);
 	}
 	put_scope(root, store, vp, at, name, var);
-}
-
-/// Remove the binding of `name` from scope `i` of `vp` (it is no longer
-/// declared there).
-pub fn scope_unbind(
-	root: &mut Root,
-	store: &mut dyn StateStore,
-	vp: &mut Vproc,
-	i: usize,
-	name: &[u8],
-) {
-	match scope_in(vp, i) {
-		In::Vec(i) => {
-			if let Some(s) = vp.scopes.get_mut(i) {
-				s.vars.remove(name);
-			}
-		},
-		In::Store(depth) => root.write(store, Change::Del(local_key(depth, name))),
-	}
 }
 
 /// Remove every binding of scope `i` of `vp`.

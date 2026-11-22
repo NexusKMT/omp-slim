@@ -30,18 +30,9 @@ pub fn eval(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 		return done(0);
 	}
 	let src = bstr::join(b" ", args);
-	// zsh numbers eval'd text from 1 under `evallineno` (its `(eval):N:`
-	// diagnostics and `$LINENO`).
-	let line = if ctx.vp.mode.dialect() == crate::bash::ids::Dialect::Zsh
-		&& ctx.zsh_option(crate::bash::zshopt::ZshOpt::Evallineno)?
-	{
-		1
-	} else {
-		ctx.line
-	};
 	// `$?` stays the caller's until the text runs its first command; text
 	// without one ends with status 0 (the script frame's end).
-	push_script(ctx.vp, &src, line, ScriptKind::Eval);
+	push_script(ctx.vp, &src, ctx.line, ScriptKind::Eval);
 	ctx.k.emit_op(ctx.cx, ctx.vp, 0, EventData::EvalEnter);
 	Ok(Outcome { status: 0, control: Control::Frame })
 }
@@ -147,91 +138,6 @@ pub fn source(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	ctx.k
 		.emit_op(ctx.cx, ctx.vp, 0, EventData::SourceEnter { path: path.as_bstr() });
 	Ok(Outcome { status: 0, control: Control::Frame })
-}
-
-/// zsh `. file [args]` / `source file [args]` (`bin_dot`): `source` tries
-/// the current directory first; a name with a `/` is used as is; else the
-/// file is looked up in `$PATH` (an empty or `.` entry is the current
-/// directory). Not found: `no such file or directory` (an error under
-/// `posixbuiltins`) and status 127; a syntax error in the file makes it
-/// 126; else the file's last status.
-pub fn zsh_source(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
-	let Some((file, rest)) = args.split_first() else {
-		return done(0);
-	};
-	let cwd = ctx.vp.cwd.clone();
-	let regular =
-		|r: ProbeResult| matches!(r, ProbeResult::Stat(Some(st)) if st.kind != StatKind::Dir);
-	let mut path = None;
-	if ctx.name == "source" {
-		let here = absolute(&cwd, file);
-		if regular(ctx.probe(Probe::Stat { path: here.clone(), follow: true })?) {
-			path = Some(here);
-		}
-	}
-	if path.is_none() && file.contains(&b'/') {
-		let here = absolute(&cwd, file);
-		if regular(ctx.probe(Probe::Stat { path: here.clone(), follow: true })?) {
-			path = Some(here);
-		} else {
-			// zsh's `try_source_file` runs `FILE.zwc` when FILE is missing;
-			// the engine runs only source text.
-			let dump = {
-				let mut ask = |p: Probe| ctx.probe(p);
-				super::zsh_zcompile::source_dump::<super::Need>(&mut ask, &cwd, file)?
-			};
-			if let Some(dump) = dump {
-				ctx.diag(super::zsh_zcompile::word_code_only(&dump));
-				return done(1);
-			}
-		}
-	} else if path.is_none() {
-		let search = ctx.scalar(b"PATH")?.unwrap_or_default();
-		for dir in search.split(|&c| c == b':') {
-			let cand = if dir.is_empty() || dir == b"." {
-				absolute(&cwd, file)
-			} else {
-				let mut p = BString::from(dir);
-				p.push(b'/');
-				p.extend_from_slice(file);
-				absolute(&cwd, &p)
-			};
-			if regular(ctx.probe(Probe::Stat { path: cand.clone(), follow: true })?) {
-				path = Some(cand);
-				break;
-			}
-		}
-	}
-	let Some(path) = path else {
-		ctx.err(Diag::NoSuchFile { name: file.clone() });
-		if ctx.zsh_option(crate::bash::zshopt::ZshOpt::Posixbuiltins)? {
-			return Ok(Outcome { status: 127, control: Control::DiscardAll });
-		}
-		return done(127);
-	};
-	let ProbeResult::Bytes(Ok(text)) = ctx.probe(Probe::Read { path: path.clone() })? else {
-		ctx.err(Diag::NoSuchFile { name: file.clone() });
-		return done(127);
-	};
-	let restore = source_args(ctx, rest, false)?;
-	// zsh `bin_dot`: under FUNCTION_ARGZERO `$0` is the file as given.
-	let argzero = ctx
-		.zsh_option(crate::bash::zshopt::ZshOpt::Functionargzero)?
-		.then(|| file.clone());
-	push_script(ctx.vp, &text, 1, ScriptKind::Source);
-	crate::bash::vm::callstack::push_source(
-		ctx.k,
-		ctx.cx.store,
-		ctx.vp,
-		file.clone(),
-		ctx.line,
-		rest,
-		restore,
-		argzero,
-	)?;
-	ctx.k
-		.emit_op(ctx.cx, ctx.vp, 0, EventData::SourceEnter { path: path.as_bstr() });
-	Ok(Outcome { status: ctx.vp.status, control: Control::Frame })
 }
 
 /// The arguments of `. file args` become the positional parameters while
@@ -358,10 +264,6 @@ pub fn exit(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	if crate::bash::vm::jobctl::check_before_exit(ctx.k, ctx.cx, ctx.vp) {
 		return done(1);
 	}
-	// zsh `zexit`: an interactive shell saves its history.
-	if ctx.vp.mode.dialect() == crate::bash::ids::Dialect::Zsh {
-		super::history::zsh::exit_save_in_builtin(ctx)?;
-	}
 	if let Some(outcome) = bash_logout(ctx, status)? {
 		return Ok(outcome);
 	}
@@ -412,84 +314,6 @@ pub fn break_(ctx: &mut Ctx<'_, '_>, args: &[BString], cont: bool) -> R {
 	Ok(Outcome { status: 0, control: Control::Break { n, cont } })
 }
 
-/// zsh `bin_break`'s numeric argument (evaluated arithmetically, zsh
-/// `mathevali`), or `None` without one; `Err` is the outcome of a bad one
-/// (reported: an error, which abandons the command line).
-fn zsh_arg(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> Result<Option<i64>, Outcome> {
-	let args = match args.first() {
-		Some(a) if a.as_slice() == b"--" => &args[1..],
-		_ => args,
-	};
-	match args {
-		[] => Ok(None),
-		[a] => match crate::bash::vm::expand::arith_value(ctx.k, ctx.cx, ctx.vp, a) {
-			Ok(n) => Ok(Some(n)),
-			Err(d) => {
-				ctx.err(d);
-				Err(Outcome { status: 1, control: Control::DiscardAll })
-			},
-		},
-		_ => {
-			ctx.usage("too many arguments");
-			Err(Outcome { status: 1, control: Control::None })
-		},
-	}
-}
-
-/// zsh `break [n]` / `continue [n]` (`bin_break`): a count that is not
-/// positive, or no loop to leave, is an error (it abandons the command
-/// line); a count beyond the loops running leaves them all. Loops count
-/// across function calls (zsh's `loops`).
-pub fn zsh_break(ctx: &mut Ctx<'_, '_>, args: &[BString], cont: bool) -> Outcome {
-	let num = match zsh_arg(ctx, args) {
-		Ok(n) => n,
-		Err(outcome) => return outcome,
-	};
-	if let Some(n) = num
-		&& n <= 0
-	{
-		ctx.usage(format!("argument is not positive: {n}"));
-		return Outcome { status: 1, control: Control::DiscardAll };
-	}
-	let loops = crate::bash::vm::exec::zsh_loop_count(ctx.vp);
-	if loops == 0 {
-		ctx.usage("not in while, until, select, or repeat loop");
-		return Outcome { status: 1, control: Control::DiscardAll };
-	}
-	let n = num.map_or(1, |n| u32::try_from(n).unwrap_or(u32::MAX).min(loops));
-	Outcome { status: 0, control: Control::Break { n, cont } }
-}
-
-/// zsh `return [n]` (`bin_break`): `$?` by default; outside a function or
-/// `.` file it leaves the shell (the engine's return handling). The status
-/// is zsh's `int lastval`, not cut to 8 bits (`return -1` makes `$?` -1).
-pub fn zsh_return(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> Outcome {
-	let status = match zsh_arg(ctx, args) {
-		Ok(n) => n.map_or(ctx.vp.status, |n| n as i32),
-		Err(outcome) => return outcome,
-	};
-	Outcome { status, control: Control::Return }
-}
-
-/// zsh `exit [n]` (`bin_break`): `$?` by default; inside a function the
-/// functions return first (their `always` lists and `EXIT` traps run).
-pub fn zsh_exit(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
-	let status = match zsh_arg(ctx, args) {
-		Ok(n) => n.map_or(ctx.vp.status, |n| (n & 0xff) as i32),
-		Err(outcome) => return Ok(outcome),
-	};
-	// zsh `zexit`: an interactive shell with jobs left warns
-	// (`checkjobs`) and stays; an `exit` right after leaves.
-	if crate::bash::vm::jobctl::check_before_exit(ctx.k, ctx.cx, ctx.vp) {
-		return Ok(Outcome { status: 0, control: Control::None });
-	}
-	// An interactive login shell sources its logout files first.
-	if let Some(o) = crate::bash::vm::zle::reader::logout_on_exit(ctx, status)? {
-		return Ok(o);
-	}
-	Ok(Outcome { status, control: Control::Exit })
-}
-
 /// `wait [-fn] [-p var] [id …]` (bash `wait.def`): wait for background
 /// children of this shell, by pid or job spec, or all of them; `-n` for
 /// the first of them to finish; `-p var` gets the waited pid. With job
@@ -532,18 +356,7 @@ pub fn wait(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	}
 	let mut list = Vec::new();
 	let mut status = 0;
-	let zsh = ctx.vp.mode.dialect() == crate::bash::ids::Dialect::Zsh;
 	for a in args {
-		if zsh && !a.iter().all(u8::is_ascii_digit) {
-			// zsh `bin_fg`: any other word is a job spec; a bad one ends
-			// the arguments with status 127.
-			if let Some(v) = zsh_wait_job(ctx, a)? {
-				list.push(v);
-				continue;
-			}
-			status = 127;
-			break;
-		}
 		if a.first().is_some_and(u8::is_ascii_digit) {
 			let Some(pid) = number(a).and_then(|n| u32::try_from(n).ok()) else {
 				// bash returns at once on a malformed pid.
@@ -558,10 +371,7 @@ pub fn wait(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 			if is_child(ctx, child) {
 				list.push(child);
 			} else {
-				// zsh `bin_fg`: silent under `posixbuiltins`.
-				if !zsh || !ctx.zsh_option(crate::bash::zshopt::ZshOpt::Posixbuiltins)? {
-					ctx.usage(format!("pid {pid} is not a child of this shell"));
-				}
+				ctx.usage(format!("pid {pid} is not a child of this shell"));
 				status = 127;
 			}
 		} else if a.starts_with(b"%") {
@@ -592,42 +402,6 @@ pub fn wait(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	}
 	let wait = Wait { children: list, all: false, any: false, into, force };
 	Ok(Outcome { status, control: Control::Wait(wait) })
-}
-
-/// zsh `getjob` and `bin_fg`'s in-use check for `wait SPEC`: the job's
-/// vpid, or `None` after zsh's warning (silent under `posixbuiltins`). A
-/// finished job is gone from zsh's table (it is deleted when reported),
-/// so `%%`, `%+`, `%-` and `%N` naming none are `SPEC: no such job`; a
-/// name or `%?text` matching none is `job not found: …`.
-fn zsh_wait_job(ctx: &mut Ctx<'_, '_>, word: &[u8]) -> Result<Option<Vpid>, super::Need> {
-	let rest = word.strip_prefix(b"%").unwrap_or(word);
-	let found = match ctx.vp.jobs.lookup(rest) {
-		crate::bash::vm::proc::JobLookup::Job(n) => ctx
-			.vp
-			.jobs
-			.get(n)
-			.filter(|j| !matches!(j.state, crate::bash::vm::proc::JobState::Done(_)))
-			.map(|j| j.vpid),
-		_ => None,
-	};
-	if found.is_none() && !ctx.zsh_option(crate::bash::zshopt::ZshOpt::Posixbuiltins)? {
-		let numbered = word.first() == Some(&b'%')
-			&& rest
-				.first()
-				.is_none_or(|&c| matches!(c, b'%' | b'+' | b'-') || c.is_ascii_digit());
-		// With no job at all zsh has no current (previous) job either.
-		let empty = ctx.vp.jobs.iter().next().is_none();
-		if numbered && empty && matches!(rest, b"" | b"%" | b"+") {
-			ctx.usage("no current job");
-		} else if numbered && empty && rest == b"-" {
-			ctx.usage("no previous job");
-		} else if numbered {
-			ctx.usage(format!("{}: no such job", word.as_bstr()));
-		} else {
-			ctx.usage(format!("job not found: {}", rest.as_bstr()));
-		}
-	}
-	Ok(found)
 }
 
 /// Whether `pid` is a child this shell can wait for: a job of its own, a

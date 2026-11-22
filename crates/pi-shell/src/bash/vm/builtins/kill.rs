@@ -42,8 +42,6 @@ fn parse_signal(spec: &[u8], platform: Platform) -> Option<Send> {
 pub(super) enum TargetError {
 	/// `%n` names no live job.
 	NoSuchJob,
-	/// zsh `getjob` already reported the bad spec.
-	Reported,
 	/// Neither a number nor a job spec.
 	NotAnId,
 	/// A vpid that is not a child of this shell.
@@ -109,7 +107,7 @@ pub fn kill(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 	}
 	let mut status = 0;
 	for arg in &args[i..] {
-		match target(ctx, arg, send, None) {
+		match target(ctx, arg, send) {
 			Ok(Some(target)) => {
 				if let Some(sig) = send.signal() {
 					ControlHandle(ctx.k.ctl.clone()).signal(target, sig);
@@ -118,10 +116,6 @@ pub fn kill(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 			Ok(None) => {},
 			Err(err) => {
 				let msg = match err {
-					TargetError::Reported => {
-						status = 1;
-						continue;
-					},
 					TargetError::NoSuchJob => format!("{}: no such job", arg.as_bstr()),
 					TargetError::NotAnId => {
 						// bash `sh_badpid`.
@@ -141,19 +135,15 @@ pub fn kill(ctx: &mut Ctx<'_, '_>, args: &[BString]) -> R {
 }
 
 /// Resolve one operand: a virtual process to signal on the bus
-/// (`Ok(Some)`), an OS process the host signalled itself (`Ok(None)`), or
-/// an error. `zsh`: zsh dialect, with `POSIX_BUILTINS`.
+/// (`Ok(Some)`), an OS process the host signalled itself (`Ok(None)`), or an
+/// error.
 pub(super) fn target(
 	ctx: &mut Ctx<'_, '_>,
 	arg: &[u8],
 	send: Send,
-	zsh: Option<bool>,
 ) -> Result<Option<SigTarget>, TargetError> {
 	if arg.starts_with(b"%") {
-		let number = match zsh {
-			Some(posix) => super::zsh_jobs::getjob(ctx, arg, posix).ok_or(TargetError::Reported)?,
-			None => super::jobs::spec(ctx, arg).map_err(|_| TargetError::NoSuchJob)?,
-		};
+		let number = super::jobs::spec(ctx, arg).map_err(|_| TargetError::NoSuchJob)?;
 		let job = ctx.vp.jobs.get_mut(number).ok_or(TargetError::NoSuchJob)?;
 		if matches!(job.state, JobState::Done(_))
 			|| matches!(

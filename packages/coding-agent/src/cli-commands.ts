@@ -144,11 +144,6 @@ export const commands: CommandEntry[] = [
 	// `cli.ts` runs these before the command framework (raw argv passthrough);
 	// the entries list them in `omp --help` and the completions.
 	{
-		name: "zsh",
-		load: () => import("./commands/native-shell").then(m => m.Zsh),
-		help: commandHelp.nativeShellHelp("zsh"),
-	},
-	{
 		name: "bash",
 		load: () => import("./commands/native-shell").then(m => m.Bash),
 		help: commandHelp.nativeShellHelp("bash"),

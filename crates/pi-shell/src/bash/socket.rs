@@ -1,8 +1,7 @@
-//! The socket seam: stream sockets for zsh's `zsh/net/socket`,
-//! `zsh/net/tcp` and `zsh/zftp` modules.
+//! The socket seam: stream sockets the host may open for the engine.
 //!
 //! [`Host::sockets`](crate::bash::Host::sockets) returns a [`Sockets`] when
-//! the host may open OS sockets (the process shell, `omp zsh`); hosts
+//! the host may open OS sockets (the process shell, `omp bash`/`omp sh`); hosts
 //! without them (agent shells) return `None`, and the socket
 //! builtins report the operation as unsupported.
 //!

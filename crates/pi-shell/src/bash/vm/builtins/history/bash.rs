@@ -12,12 +12,11 @@ use super::{
 	List,
 	bang::{self, BangOpts, Lex, LineState},
 	hist_size,
-	io::{HistOp, HistOut, Steps, WriteHow},
+	io::{HistOp, HistOut, Steps, WriteHow, in_builtin},
 	model::{Entry, HA_ACTIVE, Hist},
 	scalar,
 	words::lex_words,
 	write_now,
-	zsh::in_builtin,
 };
 use crate::bash::{
 	pattern::PatOpts,
@@ -187,21 +186,18 @@ pub fn expand_reader_line(
 				Expanded::Same
 			}
 		},
-		Err(bang::Stop::Error(e)) => Expanded::Failed(
-			e.bash()
-				.cloned()
-				.unwrap_or_else(|| BString::from("history expansion failed")),
-		),
-		Err(bang::Stop::Pending(_)) => Expanded::Failed(BString::from("history expansion failed")),
+		Err(bang::Stop::Error(e)) => {
+			Expanded::Failed(e.1.unwrap_or_else(|| BString::from("history expansion failed")))
+		},
+		Err(bang::Stop::Pending) => Expanded::Failed(BString::from("history expansion failed")),
 	})
 }
 
-/// Whether bash's reader expands history in the lines it reads: bash
-/// dialect, `set -o history`, `set -o histexpand`, an interactive shell.
+/// Whether bash's reader expands history in the lines it reads: `set -o
+/// history`, `set -o histexpand`, an interactive shell.
 pub fn histexpand_active(k: &mut Kernel, store: &mut dyn StateStore, vp: &Vproc) -> bool {
 	use crate::bash::store::{Key, MiscKey, Record};
-	vp.mode.dialect() != crate::bash::ids::Dialect::Zsh
-		&& state::option(&mut k.root, store, vp, OptId::History).unwrap_or(false)
+	state::option(&mut k.root, store, vp, OptId::History).unwrap_or(false)
 		&& state::option(&mut k.root, store, vp, OptId::Histexpand).unwrap_or(false)
 		&& matches!(
 			state::record(store, vp, Key::Misc(MiscKey::Interactive)),
