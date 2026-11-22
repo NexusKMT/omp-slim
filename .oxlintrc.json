@@ -43,7 +43,6 @@
 		"types/**",
 		"packages/natives/native/**",
 		"packages/collab-web/test/**",
-		"packages/stats/test/**",
 		"packages/coding-agent/src/export/html/**",
 		"**/*.js",
 		"**/*.mjs",
